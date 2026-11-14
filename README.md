@@ -13,7 +13,7 @@ OpenCode (клиент)  --http-->  tools/colibri_proxy.py (порт 8001)  --ht
 | Путь | Что внутри |
 |---|---|
 | `configs/opencode.json` | Провайдер `colibri-local` (baseURL `http://127.0.0.1:8001/v1`, таймауты 30 мин), агенты `qwen` / `parable` / `olmoe` |
-| `scripts/` | `Start_Qwen_Server.bat`, `Start_Parable_Server.bat`, `Start_OLMoE.bat`, `Stop_Colibri.bat` |
+| `scripts/` | `Start_All.bat` (один клик: сервер + прокси), `Start_Qwen_Server.bat`, `Start_Parable_Server.bat`, `Start_OLMoE.bat`, `Stop_Colibri.bat` |
 | `tools/colibri_proxy.py` | Прокси OpenCode → Colibri: вырезает `stream_options`, `max_completion_tokens` → `max_tokens` (cap 1024 toolless / 4096 остальные), **фильтрует `tools` по allowlist** (`KEEP_TOOLS`), пишет JSONL-лог в `logs/proxy-requests.jsonl` |
 | `tools/bench_qwen.py` | Замер префилла/декода (cap 40: 13 tools → 706,8 с; 3 tools → 488,2 с) |
 | `tools/test_qwen_parse.py` | Проверка локального патча парсера Qwen tool-calls в Colibri (int4 без `<tool_call>`: 3/3 PASS) |
@@ -33,7 +33,17 @@ OpenCode (клиент)  --http-->  tools/colibri_proxy.py (порт 8001)  --ht
 
 ## Быстрый старт
 
-См. `docs/README-SETUP.md`. Кратко: запустить `scripts\Start_Qwen_Server.bat`, поднять прокси (`py -3 tools\colibri_proxy.py --listen 8001 --upstream-host 127.0.0.1 --upstream-port 8000 --log logs\proxy-requests.jsonl`), в `configs/opencode.json` указан провайдер `colibri-local` → порт 8001.
+**Один клик:** ярлык **«Local AI Coder»** на рабочем столе (TargetPath — рабочая копия `Start_All.bat` в корне папки стека, `...\calibri\Start_All.bat`). Батник сам `cd` в корень стека, так что его расположение неважно. Последовательность: окно Colibri-сервера (модель грузится) → пауза 60 с → окно прокси (8001). После этого можно открывать OpenCode с агентом `qwen`.
+
+Батник ASCII-only и сам резолвит папку «Документы» (`[Environment]::GetFolderPath('MyDocuments')`), поэтому не ломается на кириллических путях. Если стек лежит не в `...\OneDrive\Документы\calibri` — поменяйте имя папки в строке `if not exist "%DOCS%\calibri"`.
+
+**Вручную (или на другой машине):**
+
+1. `scripts\Start_Qwen_Server.bat` — Colibri + Qwen3-Coder-30B-A3B (CUDA, ctx 16384, cap по умолчанию).
+2. `py -3 tools\colibri_proxy.py --log logs\proxy-requests.jsonl` — прокси 8001 → 8000 (у скрипта дефолты `--listen 8001 --upstream-host 127.0.0.1 --upstream-port 8000`; аргумент `--log` **обязателен** — без него скрипт не стартует).
+3. OpenCode: провайдер `colibri-local` → порт 8001 (см. `configs/opencode.json`).
+
+Полная инструкция, отладка и откат cap/ctx: `docs/README-SETUP.md`.
 
 ## Внешние зависимости
 
