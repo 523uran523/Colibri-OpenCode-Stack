@@ -1153,5 +1153,23 @@ async function buildPackage(personal) {
 $('package-public').addEventListener('click', () => buildPackage(false));
 $('package-personal').addEventListener('click', () => buildPackage(true));
 organizeParameters(); $('chat-model-menu').append($('chat-ollama-notice')); restoreConversation(); if (app.claudeSession) updateClaudeSession(app.claudeSession); renderConversation(); renderExecutionTarget(); view(location.hash.slice(1) || 'chat');
+
+/* ===== Theme toggle ===== */
+(function initThemeToggle() {
+  const root = document.documentElement;
+  const toggle = $('theme-toggle');
+  if (!toggle) return;
+  let current = localStorage.getItem('theme') || 'light';
+  root.setAttribute('data-theme', current);
+  const icon = current === 'dark' ? '☀' : '◐';
+  toggle.textContent = icon;
+  toggle.addEventListener('click', () => {
+    current = current === 'light' ? 'dark' : 'light';
+    root.setAttribute('data-theme', current);
+    localStorage.setItem('theme', current);
+    toggle.textContent = current === 'dark' ? '☀' : '◐';
+    toggle.setAttribute('aria-label', `Переключить на ${current === 'dark' ? 'светлую' : 'тёмную'} тему`);
+  });
+})();
 window.EngeeApp = { refresh: async () => { const preserveDrafts = window.EngeePersistence?.hasSettingsDraft() === true; await refreshState(false, preserveDrafts); if (!preserveDrafts) { renderProviderSelect('provider'); $('baseUrl').value = app.state.config.baseUrl || ''; $('model').value = app.state.config.model || ''; providerFields(); } if (usesModelCatalog(app.state?.config.provider)) await discoverModels(); }, view, busy: () => app.busy, state: () => app.state };
 refreshState().then(refreshAllConnections).catch(error => { paintHealth('server-status', 'bad', `Приложение: ${readableError(error)}`); showError(error); });
