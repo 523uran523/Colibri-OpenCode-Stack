@@ -1,0 +1,4 @@
+interface:
+  display_name: "Engee Scripts"
+  short_description: "Create, style, run, and debug Engee ngscript files"
+  default_prompt: "Use $engee-scripts to create a corporate-style Engee .ngscript workflow."

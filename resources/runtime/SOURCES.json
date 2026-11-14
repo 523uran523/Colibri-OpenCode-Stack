@@ -1,0 +1,49 @@
+{
+  "appVersion": "1.2.0",
+  "preparedDate": "2026-10-08",
+  "platform": "windows-x64",
+  "node": {
+    "version": "24.19.0",
+    "path": "node.exe",
+    "source": "Bundled runtime; binary verified against official Node.js SHASUMS256.txt",
+    "url": "https://nodejs.org/dist/v24.19.0/win-x64/node.exe",
+    "sha256": "3602f2bb1a10f2cbab4c36886218a33c1ab3db87290e73b033c46c77147d0237",
+    "checksumsUrl": "https://nodejs.org/dist/v24.19.0/SHASUMS256.txt",
+    "license": "NODE-LICENSE.txt"
+  },
+  "llama": {
+    "release": "b11493",
+    "commit": "847f447c3",
+    "version": "0.6.0-dev",
+    "path": "llama/llama-server.exe",
+    "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11493/llama-b11493-bin-win-cpu-x64.zip",
+    "archiveSha256": "2c003ae981c762acc50aea9a0f3b97b308e702ecb2f79132adc308bf8b57e64f",
+    "archiveDigestVerified": true,
+    "license": "llama/LICENSE.txt",
+    "openMPlicense": "llama/LICENSE-LLVM-OpenMP"
+  },
+  "microsoftVC": {
+    "version": "14.51.36247.0",
+    "url": "https://aka.ms/vc14/vc_redist.x64.exe",
+    "installerSha256": "843068991daaa1f73ad9f6239bce4d0f6a07a51f18c37ea2a867e9beca71295c",
+    "authenticode": "Microsoft Corporation; Valid",
+    "deployment": "app-local DLLs extracted from official redistributable; no system installation",
+    "files": [
+      "msvcp140.dll",
+      "vcruntime140.dll",
+      "vcruntime140_1.dll"
+    ],
+    "license": "MICROSOFT-VC-LICENSE.docx",
+    "licenseUrl": "https://aka.ms/VCRedistLicense"
+  },
+  "model": {
+    "repo": "Qwen/Qwen2.5-0.5B-Instruct-GGUF",
+    "revision": "9217f5db79a29953eb74d5343926648285ec7e67",
+    "file": "../LLM/qwen2.5-0.5b-instruct-q4_k_m.gguf",
+    "sizeBytes": 491400032,
+    "url": "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/9217f5db79a29953eb74d5343926648285ec7e67/qwen2.5-0.5b-instruct-q4_k_m.gguf",
+    "sha256": "74a4da8c9fdbcd15bd1f6d01d621410d31c6fc00986f5eb687824e7b93d7a9db",
+    "officialLfsDigestVerified": true,
+    "license": "../LLM/QWEN-LICENSE.txt"
+  }
+}

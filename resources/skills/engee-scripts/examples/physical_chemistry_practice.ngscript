@@ -1,0 +1,326 @@
+{
+  "nbformat": 4,
+  "nbformat_minor": 5,
+  "metadata": {
+    "kernelspec": {
+      "name": "ijulia-1.9",
+      "display_name": "IJulia 1.9.3",
+      "language": "julia"
+    },
+    "language_info": {
+      "name": "julia",
+      "file_extension": ".jl",
+      "version": "1.9.3"
+    },
+    "engee": {}
+  },
+  "cells": [
+    {
+      "id": "f01a0001",
+      "cell_type": "markdown",
+      "source": [
+        "# Простые практические задачи по физической химии\n\nЭтот интерактивный скрипт показывает четыре типовых расчета, которые часто встречаются в лабораторной и инженерной практике: газовые законы, кислотно-основное равновесие, температурная зависимость скорости реакции и электрохимический потенциал.\n\n> Все вычисления выполнены на Julia без внешних пакетов, чтобы пример был устойчивым при запуске через API Engee.\n"
+      ],
+      "attachments": {},
+      "metadata": {
+        "name": "Титульный раздел",
+        "engee": {
+          "isDisplay": true,
+          "isParagraph": true,
+          "isClosedParagraph": false,
+          "amountHideCellsInside": 0,
+          "codeOutputView": "col",
+          "codeOutputHidden": false
+        }
+      }
+    },
+    {
+      "id": "f01a0002",
+      "cell_type": "markdown",
+      "source": [
+        "## План работы\n\n1. Задать физико-химические константы и удобные функции форматирования.\n2. Рассчитать давление идеального газа и сравнить результат с атмосферным давлением.\n3. Оценить pH раствора слабой кислоты через квадратное уравнение равновесия.\n4. Найти энергию активации по двум константам скорости с помощью уравнения Аррениуса.\n5. Посчитать ЭДС гальванического элемента по уравнению Нернста.\n6. Вернуть краткую строку-отчет, удобную для автоматической проверки.\n"
+      ],
+      "attachments": {},
+      "metadata": {
+        "name": "План работы",
+        "engee": {
+          "isDisplay": true,
+          "isParagraph": true,
+          "isClosedParagraph": false,
+          "amountHideCellsInside": 0,
+          "codeOutputView": "col",
+          "codeOutputHidden": false
+        }
+      }
+    },
+    {
+      "id": "f01a0003",
+      "cell_type": "code",
+      "source": [
+        "# Константы и вспомогательные функции\nconst R = 8.31446261815324      # Дж/(моль*K)\nconst F = 96485.33212           # Кл/моль\nconst ATM = 101325.0            # Па\n\nround_sig(x; digits=4) = round(x; sigdigits=digits)\nas_percent(x; digits=3) = string(round(100x; sigdigits=digits), \"%\")\n\n\"constants-ready\"\n"
+      ],
+      "execution_count": 0,
+      "outputs": [],
+      "metadata": {
+        "name": "Константы",
+        "engee": {
+          "isDisplay": true,
+          "isParagraph": false,
+          "isClosedParagraph": false,
+          "amountHideCellsInside": 0,
+          "codeOutputView": "col",
+          "codeOutputHidden": false,
+          "outputInfo": {
+            "isExpanded": false,
+            "scrollTop": 0
+          },
+          "maskInfo": {
+            "isMaskVisible": true,
+            "isEditorVisible": true,
+            "isAutoplayActive": false
+          }
+        }
+      }
+    },
+    {
+      "id": "f01a0004",
+      "cell_type": "markdown",
+      "source": [
+        "## Задача 1. Давление идеального газа\n\n**Условие.** В герметичном сосуде объемом 5.00 л находится 0.250 моль азота при 25 °C. Оценить давление газа.\n\n**Модель.** Для достаточно разреженного газа используем уравнение Менделеева-Клапейрона:\n\n$$pV = nRT.$$\n\nОбъем переводим в м³, температуру - в K. Результат удобно сравнить с 1 атм.\n"
+      ],
+      "attachments": {},
+      "metadata": {
+        "name": "Идеальный газ",
+        "engee": {
+          "isDisplay": true,
+          "isParagraph": true,
+          "isClosedParagraph": false,
+          "amountHideCellsInside": 0,
+          "codeOutputView": "col",
+          "codeOutputHidden": false
+        }
+      }
+    },
+    {
+      "id": "f01a0005",
+      "cell_type": "code",
+      "source": [
+        "function ideal_gas_pressure(n_mol, volume_liters, temperature_celsius)\n    volume_m3 = volume_liters / 1000\n    temperature_k = temperature_celsius + 273.15\n    pressure_pa = n_mol * R * temperature_k / volume_m3\n    return (\n        pressure_pa = pressure_pa,\n        pressure_atm = pressure_pa / ATM,\n        temperature_k = temperature_k\n    )\nend\n\ngas = ideal_gas_pressure(0.250, 5.00, 25.0)\nstring(\"p = \", round_sig(gas.pressure_pa), \" Па = \", round_sig(gas.pressure_atm), \" атм\")\n"
+      ],
+      "execution_count": 0,
+      "outputs": [],
+      "metadata": {
+        "name": "Расчет идеального газа",
+        "engee": {
+          "isDisplay": true,
+          "isParagraph": false,
+          "isClosedParagraph": false,
+          "amountHideCellsInside": 0,
+          "codeOutputView": "col",
+          "codeOutputHidden": false,
+          "outputInfo": {
+            "isExpanded": false,
+            "scrollTop": 0
+          },
+          "maskInfo": {
+            "isMaskVisible": true,
+            "isEditorVisible": true,
+            "isAutoplayActive": false
+          }
+        }
+      }
+    },
+    {
+      "id": "f01a0006",
+      "cell_type": "markdown",
+      "source": [
+        "## Задача 2. pH раствора слабой кислоты\n\n**Условие.** Найти pH 0.0100 М уксусной кислоты при 25 °C. Используем $K_a = 1.8\\cdot 10^{-5}$.\n\n**Модель.** Для равновесия $HA \\rightleftharpoons H^+ + A^-$:\n\n$$K_a = \\frac{x^2}{C_0 - x},$$\n\nгде $x = [H^+]$. Решаем квадратное уравнение без приближения $x \\ll C_0$, а затем вычисляем $pH = -\\log_{10}[H^+]$.\n"
+      ],
+      "attachments": {},
+      "metadata": {
+        "name": "Слабая кислота",
+        "engee": {
+          "isDisplay": true,
+          "isParagraph": true,
+          "isClosedParagraph": false,
+          "amountHideCellsInside": 0,
+          "codeOutputView": "col",
+          "codeOutputHidden": false
+        }
+      }
+    },
+    {
+      "id": "f01a0007",
+      "cell_type": "code",
+      "source": [
+        "function weak_acid_ph(c0, ka)\n    h = (-ka + sqrt(ka^2 + 4ka*c0)) / 2\n    alpha = h / c0\n    ph = -log10(h)\n    return (h = h, alpha = alpha, ph = ph)\nend\n\nacetic = weak_acid_ph(0.0100, 1.8e-5)\nstring(\"[H+] = \", round_sig(acetic.h), \" М; pH = \", round(acetic.ph; digits=3), \"; степень диссоциации = \", as_percent(acetic.alpha))\n"
+      ],
+      "execution_count": 0,
+      "outputs": [],
+      "metadata": {
+        "name": "Расчет pH",
+        "engee": {
+          "isDisplay": true,
+          "isParagraph": false,
+          "isClosedParagraph": false,
+          "amountHideCellsInside": 0,
+          "codeOutputView": "col",
+          "codeOutputHidden": false,
+          "outputInfo": {
+            "isExpanded": false,
+            "scrollTop": 0
+          },
+          "maskInfo": {
+            "isMaskVisible": true,
+            "isEditorVisible": true,
+            "isAutoplayActive": false
+          }
+        }
+      }
+    },
+    {
+      "id": "f01a0008",
+      "cell_type": "markdown",
+      "source": [
+        "## Задача 3. Энергия активации по двум измерениям\n\n**Условие.** Константа скорости реакции равна $k_1 = 1.2\\cdot 10^{-3}$ с⁻¹ при 298 K и $k_2 = 4.8\\cdot 10^{-3}$ с⁻¹ при 318 K. Найти энергию активации.\n\n**Модель.** Из уравнения Аррениуса:\n\n$$\\ln\\frac{k_2}{k_1} = -\\frac{E_a}{R}\\left(\\frac{1}{T_2}-\\frac{1}{T_1}\\right).$$\n\nТак как $T_2 > T_1$ и $k_2 > k_1$, энергия активации получается положительной.\n"
+      ],
+      "attachments": {},
+      "metadata": {
+        "name": "Аррениус",
+        "engee": {
+          "isDisplay": true,
+          "isParagraph": true,
+          "isClosedParagraph": false,
+          "amountHideCellsInside": 0,
+          "codeOutputView": "col",
+          "codeOutputHidden": false
+        }
+      }
+    },
+    {
+      "id": "f01a0009",
+      "cell_type": "code",
+      "source": [
+        "function activation_energy(k1, t1, k2, t2)\n    ea_j_mol = R * log(k2 / k1) / (1 / t1 - 1 / t2)\n    return ea_j_mol\nend\n\nea = activation_energy(1.2e-3, 298.0, 4.8e-3, 318.0)\nstring(\"Ea = \", round(ea / 1000; digits=2), \" кДж/моль\")\n"
+      ],
+      "execution_count": 0,
+      "outputs": [],
+      "metadata": {
+        "name": "Расчет Аррениуса",
+        "engee": {
+          "isDisplay": true,
+          "isParagraph": false,
+          "isClosedParagraph": false,
+          "amountHideCellsInside": 0,
+          "codeOutputView": "col",
+          "codeOutputHidden": false,
+          "outputInfo": {
+            "isExpanded": false,
+            "scrollTop": 0
+          },
+          "maskInfo": {
+            "isMaskVisible": true,
+            "isEditorVisible": true,
+            "isAutoplayActive": false
+          }
+        }
+      }
+    },
+    {
+      "id": "f01a0010",
+      "cell_type": "markdown",
+      "source": [
+        "## Задача 4. ЭДС элемента по уравнению Нернста\n\n**Условие.** Для элемента $Zn|Zn^{2+}||Cu^{2+}|Cu$ принять $E^0 = 1.10$ В, $n = 2$, $T = 298.15$ K. Найти ЭДС при $[Zn^{2+}] = 0.10$ М и $[Cu^{2+}] = 1.00$ М.\n\n**Модель.** Реакция: $Zn + Cu^{2+} \\rightarrow Zn^{2+} + Cu$. Тогда $Q = [Zn^{2+}]/[Cu^{2+}]$, а\n\n$$E = E^0 - \\frac{RT}{nF}\\ln Q.$$\n"
+      ],
+      "attachments": {},
+      "metadata": {
+        "name": "Нернст",
+        "engee": {
+          "isDisplay": true,
+          "isParagraph": true,
+          "isClosedParagraph": false,
+          "amountHideCellsInside": 0,
+          "codeOutputView": "col",
+          "codeOutputHidden": false
+        }
+      }
+    },
+    {
+      "id": "f01a0011",
+      "cell_type": "code",
+      "source": [
+        "function nernst_potential(e0, n, temperature_k, zn2, cu2)\n    q = zn2 / cu2\n    e = e0 - (R * temperature_k) / (n * F) * log(q)\n    return (q = q, e = e)\nend\n\ncell = nernst_potential(1.10, 2, 298.15, 0.10, 1.00)\nstring(\"Q = \", round_sig(cell.q), \"; E = \", round(cell.e; digits=4), \" В\")\n"
+      ],
+      "execution_count": 0,
+      "outputs": [],
+      "metadata": {
+        "name": "Расчет Нернста",
+        "engee": {
+          "isDisplay": true,
+          "isParagraph": false,
+          "isClosedParagraph": false,
+          "amountHideCellsInside": 0,
+          "codeOutputView": "col",
+          "codeOutputHidden": false,
+          "outputInfo": {
+            "isExpanded": false,
+            "scrollTop": 0
+          },
+          "maskInfo": {
+            "isMaskVisible": true,
+            "isEditorVisible": true,
+            "isAutoplayActive": false
+          }
+        }
+      }
+    },
+    {
+      "id": "f01a0012",
+      "cell_type": "markdown",
+      "source": [
+        "## Итоги и самопроверка\n\nПолученные результаты имеют правильный физический смысл:\n\n- давление газа в сосуде близко к 1.2 атм;\n- pH слабой кислоты заметно выше, чем у сильной кислоты той же аналитической концентрации;\n- энергия активации положительна, потому что скорость растет с температурой;\n- при $Q < 1$ ЭДС элемента больше стандартной.\n\nПоследняя ячейка возвращает компактную строку. Это удобно для запуска через Engee API и автоматической отладки.\n"
+      ],
+      "attachments": {},
+      "metadata": {
+        "name": "Итоги",
+        "engee": {
+          "isDisplay": true,
+          "isParagraph": true,
+          "isClosedParagraph": false,
+          "amountHideCellsInside": 0,
+          "codeOutputView": "col",
+          "codeOutputHidden": false
+        }
+      }
+    },
+    {
+      "id": "f01a0013",
+      "cell_type": "code",
+      "source": [
+        "checks = (\n    gas_pressure_atm = round(gas.pressure_atm; digits=3),\n    acetic_ph = round(acetic.ph; digits=3),\n    activation_energy_kj_mol = round(ea / 1000; digits=2),\n    cell_voltage_v = round(cell.e; digits=4)\n)\n\nstring(\n    \"physical-chemistry-practice ok; \",\n    \"p_atm=\", checks.gas_pressure_atm, \"; \",\n    \"pH=\", checks.acetic_ph, \"; \",\n    \"Ea_kJ_mol=\", checks.activation_energy_kj_mol, \"; \",\n    \"E_V=\", checks.cell_voltage_v\n)\n"
+      ],
+      "execution_count": 0,
+      "outputs": [],
+      "metadata": {
+        "name": "Финальная проверка",
+        "engee": {
+          "isDisplay": true,
+          "isParagraph": false,
+          "isClosedParagraph": false,
+          "amountHideCellsInside": 0,
+          "codeOutputView": "col",
+          "codeOutputHidden": false,
+          "outputInfo": {
+            "isExpanded": false,
+            "scrollTop": 0
+          },
+          "maskInfo": {
+            "isMaskVisible": true,
+            "isEditorVisible": true,
+            "isAutoplayActive": false
+          }
+        }
+      }
+    }
+  ]
+}
