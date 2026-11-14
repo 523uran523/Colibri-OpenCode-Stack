@@ -302,12 +302,12 @@ async function fingerprint(target){try{return createHash('sha256').update(await 
 const tool = (name,description,properties={},required=[]) => ({type:'function',function:{name,description,parameters:{type:'object',properties,required,additionalProperties:false}}});
 const str = description=>({type:'string',description});
 const tools = [
-  tool('list_files','Показать файлы внутри выбранной рабочей папки Engee.',{path:str('Относительная папка, пусто для корня.')}),
-  tool('read_file','Прочитать текстовый файл рабочей папки Engee.',{path:str('Относительный путь.')},['path']),
-  tool('write_file','Предложить запись файла Engee. Пользователь подтвердит точное содержимое.',{path:str('Относительный путь.'),content:str('Полное содержимое файла.')},['path','content']),
-  tool('read_skill','Прочитать SKILL.md или ресурс навыка. Возвращает полный текст навыка — вызывай только когда навык действительно нужен.',{name:str('Имя навыка.'),path:str('Относительный ресурс навыка, по умолчанию SKILL.md.')},['name']),
+  tool('list_files','Показать файлы рабочей папки.',{path:str('Относительная папка, пусто для корня.')}),
+  tool('read_file','Прочитать текстовый файл рабочей папки.',{path:str('Относительный путь.')},['path']),
+  tool('write_file','Предложить запись файла. Пользователь подтвердит точное содержимое.',{path:str('Относительный путь.'),content:str('Полное содержимое файла.')},['path','content']),
+  tool('read_skill','Прочитать SKILL.md или ресурс навыка. Возвращает полный текст — вызывай только когда навык действительно нужен.',{name:str('Имя навыка.'),path:str('Относительный ресурс навыка, по умолчанию SKILL.md.')},['name']),
   tool('search_skills','Поиск по локальной справке и навыкам. Возвращает фрагменты и пути — не читает полные SKILL.md, экономит контекст.',{query:str('Искомое слово/фраза.'),name:str('Ограничить одним навыком, необязательно.')},['query']),
-  tool('save_skill','Предложить новый навык Engee, сохраняемый только в resources/skills.',{name:str('Имя латиницей, цифры и дефисы.'),content:str('Полный SKILL.md с YAML name/description.')},['name','content']),
+  tool('save_skill','Предложить новый навык, сохраняемый в resources/skills.',{name:str('Имя латиницей, цифры и дефисы.'),content:str('Полный SKILL.md с YAML name/description.')},['name','content']),
   tool('engee_status','Проверить статус Engee через настроенный личный API.'),
   tool('engee_start','Предложить запуск среды Engee. Пользователь подтвердит версию и таймаут.',{versionId:str('ID из списка доступных версий; пусто для версии аккаунта.'),inactivityTimeout:{type:'integer',description:'Таймаут простоя в секундах, кратный 60.'}}),
   tool('engee_stop','Предложить остановку среды Engee. Требует отдельного подтверждения пользователя.'),
@@ -317,7 +317,7 @@ const tools = [
   tool('engee_eval_code','Предложить выполнение точного кода Julia в Engee. Для вычислений используй фактический результат Engee; требуется подтверждение пользователя.',{code:str('Полный код Julia, например 1+1 или sin.(1:2).')},['code']),
 ];
 const juliaTool=tool('julia_eval_code','Предложить выполнение точного кода в локальной Julia. Пользователь подтверждает код, рабочую папку и установленную версию; код выполняется с обычными правами пользователя.',{code:str('Полный код Julia до 64 КиБ. Последнее значение возвращается даже без println.')},['code']);
-function executionTarget(value='engee'){if(!['engee','julia'].includes(value))throw fail('Выберите режим выполнения Engee или Julia.');return value;}
+function executionTarget(value='julia'){if(!['julia'].includes(value))throw fail('Выберите режим выполнения.');return value;}
 function toolsFor(target){
   let base = target==='julia' ? [...tools.filter(item=>!['engee_eval_file','engee_eval_code'].includes(item.function.name)),juliaTool] : tools;
   if(config.engeeEnabled !== true){
@@ -387,8 +387,10 @@ async function prepareTool(name,args={},target='engee') {
   if(name==='read_file')return {result:{content:await readText(workspacePath(args.path))}};
   if(name==='read_skill')return {result:{content:await readText(skillPath(args.name,args.path||'SKILL.md'))}};
   if(name==='search_skills')return {result:await searchSkills(args.query,args.name)};
-  if(name==='engee_status')return {result:await engeeInfo()};
-  if(name==='engee_list_files'){const info=await engeeInfo();if(info.serverStatus!=='running'||!info.serverReady)throw fail('Дождитесь готовности среды Engee.');const runtime=validateUrl(config.engeeRuntimeUrl||new URL(info.runtimeUrl,config.engeeAccountUrl+'/').href,true);return {result:await listRemoteFiles(engeeRequest,runtime,args.path||'')};}
+  if(config.engeeEnabled===true){
+    if(name==='engee_status')return {result:await engeeInfo()};
+    if(name==='engee_list_files'){const info=await engeeInfo();if(info.serverStatus!=='running'||!info.serverReady)throw fail('Дождитесь готовности среды Engee.');const runtime=validateUrl(config.engeeRuntimeUrl||new URL(info.runtimeUrl,config.engeeAccountUrl+'/').href,true);return {result:await listRemoteFiles(engeeRequest,runtime,args.path||'')};}
+  }
   let action={name,arguments:{...args},workspace:config.workspace,executionTarget:target};
   if(name==='julia_eval_code'){checkEngeeCode(typeof args.code==='string'?args.code:'');action.juliaSnapshot=await prepareJuliaCode({workspace:workspacePath(''),juliaPath:config.juliaPath||'',code:args.code});action.arguments={code:action.juliaSnapshot.code};action.description='Выполнение этого точного кода в локальной Julia. Код может читать и изменять файлы с обычными правами пользователя. Время — до 30 секунд, вывод — до 256 КиБ.';action.preview={origin:'julia',cwd:action.juliaSnapshot.cwd,executable:action.juliaSnapshot.executable,version:action.juliaSnapshot.version};}
   if(name==='engee_start')action.description='Запуск среды Engee с выбранной версией и таймаутом простоя';
@@ -666,7 +668,9 @@ const server=http.createServer(async(req,res)=>{
       let page,status=200;try{if(url.searchParams.getAll('state').length!==1||url.searchParams.getAll('code').length>1||url.searchParams.getAll('error').length>1)throw fail('Не удалось подтвердить запрос входа OpenRouter. Начните подключение из Engee Agent.');page=openRouterAuth.callback({state:url.searchParams.get('state'),code:url.searchParams.get('code'),error:url.searchParams.get('error')});}catch(error){status=error.status||400;page=callbackPage(error.status?error.message:'Не удалось завершить вход OpenRouter. Повторите подключение.');}res.writeHead(status,page.headers);return res.end(page.html);
     }
     if(req.method==='GET' && route==='/api/state'){
-      const skills=await skillList(),julia=await juliaCapability({juliaPath:config.juliaPath||''});return send(res,200,{executionTargets:{engee:{available:true},julia},config:publicConfig(),providers,connections:connections.list(),notices,models:await models(),local:localState(),skills,workspaceFiles:(await listFiles()).files,systemPrompt:systemPrompt+'\n'+skills.map(s=>s.name+': '+s.title).join('\n'),engine:{state:engineState}});
+      const skills=await skillList();let julia={available:false};if(config.juliaPath&&config.juliaPath.length>0){try{julia=await juliaCapability({juliaPath:config.juliaPath});}catch{}}
+      const execTargets={julia};if(config.engeeEnabled===true)execTargets.engee={available:true};
+      return send(res,200,{executionTargets:execTargets,config:publicConfig(),providers,connections:connections.list(),notices,models:await models(),local:localState(),skills,workspaceFiles:(await listFiles()).files,systemPrompt:systemPrompt+'\n'+skills.map(s=>s.name+': '+s.title).join('\n'),engine:{state:engineState}});
     }
     if(req.method==='GET' && route==='/api/llm/status'){
       const selected={provider:config.provider,model:config.model,connectionId:config.connectionId,baseUrl:config.baseUrl,modelsDir:config.modelsDir,localModelPath:config.localModelPath},profile=activeConnection(),preset=providers.find(item=>item.id===selected.provider);
