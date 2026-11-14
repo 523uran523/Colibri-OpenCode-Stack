@@ -72,7 +72,7 @@ let localStarting = false;
 let engeeAccess = '';
 
 // --- Engine management (Colibri + Proxy) ---
-const CALIBRI_ROOT = process.env.CALIBRI_ROOT || path.resolve(ROOT,'..','..','OneDrive\\Documents\\calibri');
+const CALIBRI_ROOT = process.env.CALIBRI_ROOT || ROOT; // AgentLite is self-contained now
 let COLIBRI_RUNTIME='colibri-v2.1.0';try{
   const candidate=path.join(process.env.LOCALAPPDATA||'','colibri','runtime',COLIBRI_RUNTIME);
   if(!existsSync(path.join(candidate,'coli')))throw new Error('no coli binary');
@@ -99,7 +99,7 @@ async function startEngine(){
     const h=await fetch(`http://127.0.0.1:${ENGINE_PORT}/health`).catch(()=>null);
     if(h?.ok){
       engineState='running';
-      proxyProcess=spawn('py',['-3',path.join(CALIBRI_ROOT,'tools','colibri_proxy.py'),`--listen=${PROXY_PORT}`,`--upstream-host=127.0.0.1`,`--upstream-port=${ENGINE_PORT}`,`--log`,path.join(CALIBRI_ROOT,'logs','proxy-requests.jsonl')],{cwd:CALIBRI_ROOT,stdio:['ignore','ignore','ignore']});
+      proxyProcess=spawn('py',['-3',path.join(CALIBRI_ROOT,'tools','colibri_proxy.py'),`--listen=${PROXY_PORT}`,`--upstream-host=127.0.0.1`,`--upstream-port=${ENGINE_PORT}`,`--log`,path.join(DATA,'logs','proxy-requests.jsonl')],{cwd:CALIBRI_ROOT,stdio:['ignore','ignore','ignore']});
       proxyProcess.on('error',()=>{});proxyProcess.on('close',()=>{engineState='stopped';engineProcess?.kill();});
     }else{throw new Error('Colibri не ответил на /health через 3 сек.');}
   }catch(e){engineState='error';console.error('startEngine failed:',e.message);}
