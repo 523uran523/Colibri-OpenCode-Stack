@@ -6,7 +6,7 @@ const app = { state: null, history: [], events: [], busy: false, controller: nul
 try { if (sessionStorage.getItem(EXECUTION_KEY) === 'julia') app.executionTarget = 'julia'; } catch { /* The current mode works without browser storage. */ }
 let credentialEpoch = 0;
 let freeApiFlow = null;
-const labels = { chat: ['ДИАЛОГ', 'Рабочее пространство'], settings: ['ПАРАМЕТРЫ', 'Параметры'], files: ['ПАРАМЕТРЫ', 'Параметры'], skills: ['ПАРАМЕТРЫ', 'Параметры'], downloads: ['ПАРАМЕТРЫ', 'Параметры'], terminal: ['ТЕРМИНАЛ', 'Терминал проекта Engee'] };
+const labels = { chat: ['ДИАЛОГ', 'Рабочее пространство'], settings: ['ПАРАМЕТРЫ', 'Параметры'], files: ['ПАРАМЕТРЫ', 'Параметры'], skills: ['ПАРАМЕТРЫ', 'Параметры'], downloads: ['ПАРАМЕТРЫ', 'Параметры'], terminal: ['ТЕРМИНАЛ', 'Терминал проекта'], logs: ['ЛОГИ', 'Логи движка Colibri'] };
 const SLASH_COMMANDS = [ ['/help', 'Справка и список команд'], ['/status', 'Проверить сервер Engee'], ['/eval', 'Выполнить код в выбранной среде'], ['/files', 'Файлы и рабочая папка'], ['/skills', 'Открыть навыки'], ['/clear', 'Очистить этот диалог'], ['/new', 'Начать новый диалог'], ['/models', 'Найти доступные модели'] ];
 const HELP_SECTIONS = { models: 'models', attachments: 'dialog', cloud: 'cloud', local: 'local', workspace: 'project', engee: 'engee', claude: 'claude', opencode: 'opencode', commands: 'commands', config: 'binding', eval: 'eval', terminal: 'terminal', skills: 'skills', downloads: 'downloads', editor: 'editor', ollama: 'ollama', interface: 'interface', connections: 'connections' };
 
@@ -96,7 +96,7 @@ function renderChatModelButton() { const config = app.state?.config || {}, provi
 function view(name) {
   const freeApiLink = name === 'settings/openrouter'; if (freeApiLink) name = 'settings';
   if (!labels[name]) name = 'chat';
-  const surface = name === 'files' ? 'chat' : ['skills', 'downloads'].includes(name) ? 'settings' : name;
+  const surface = name === 'files' ? 'chat' : ['skills', 'downloads', 'logs'].includes(name) ? name : name;
   if (name !== 'files' && $('project-files-dialog').open) closeProjectFiles(false);
   if (surface !== 'settings') clearCredentialViews();
   document.querySelectorAll('.view').forEach(element => { element.hidden = element.id !== `view-${surface}`; });
@@ -1153,6 +1153,55 @@ async function buildPackage(personal) {
 $('package-public').addEventListener('click', () => buildPackage(false));
 $('package-personal').addEventListener('click', () => buildPackage(true));
 organizeParameters(); $('chat-model-menu').append($('chat-ollama-notice')); restoreConversation(); if (app.claudeSession) updateClaudeSession(app.claudeSession); renderConversation(); renderExecutionTarget(); view(location.hash.slice(1) || 'chat');
+
+/* ===== Engine management ===== */
+(function initEngine() {
+  const startBtn = $('engine-start'), stopBtn = $('engine-stop'), refreshBtn = $('engine-refresh');
+  const dot = $('engine-state-dot'), label = $('engine-state-label'), logEl = $('engine-log');
+  const spinner = $('engine-spinner');
+  let logEventSource = null;
+  function setEngineUI(state) {
+    if (!dot) return;
+    const cls = state === 'running' ? 'good' : state === 'starting' ? 'pending' : state === 'error' ? 'bad' : 'pending';
+    dot.className = 'engine-dot is-' + cls;
+    const names = { stopped: 'Движок: Остановлен', starting: 'Движок: Загружается…', running: 'Движок: Работает', error: 'Движок: Ошибка' };
+    label.textContent = names[state] || 'Движок: ?';
+    if (startBtn) startBtn.disabled = state === 'starting' || state === 'running';
+    if (stopBtn) stopBtn.disabled = state !== 'running';
+    if (spinner) spinner.hidden = state !== 'starting';
+  }
+  async function fetchStatus() {
+    try { const r = await api('/api/engine/status'); if (r.state && logEl) setEngineUI(r.state); } catch {}
+  }
+  function openLogStream() {
+    closeLogStream();
+    const url = new URL('/api/logs/stream', location.origin);
+    logEventSource = new EventSource(url);
+    logEventSource.onmessage = (e) => {
+      try { const d = JSON.parse(e.data); if (d.type === 'init') { setEngineUI(d.state); if (logEl) logEl.querySelector('pre').textContent = d.log || '(пусто)'; }
+        else if (d.type === 'log' && logEl) { const pre = logEl.querySelector('pre'); pre.textContent += '\n' + d.lines.split('\n').slice(-80).join('\n'); pre.scrollTop = pre.scrollHeight; }
+      } catch {}
+    };
+    logEventSource.onerror = () => { closeLogStream(); if (logEl) logEl.querySelector('pre').textContent += '\n[соединение потеряно]'; };
+  }
+  function closeLogStream() { if (logEventSource) { logEventSource.close(); logEventSource = null; } }
+  if (startBtn) startBtn.addEventListener('click', async () => {
+    try { const r = await api('/api/engine/start', {}, true); setEngineUI(r.state); $('engine-status').textContent = 'Движок: ' + r.state; }
+    catch (e) { if (logEl) logEl.querySelector('pre').textContent = 'Ошибка запуска: ' + (e.message || String(e)); }
+  });
+  if (stopBtn) stopBtn.addEventListener('click', async () => {
+    try { await api('/api/engine/stop'); setEngineUI('stopped'); $('engine-status').textContent = 'Движок: остановлен'; } catch {}
+  });
+  if (refreshBtn) refreshBtn.addEventListener('click', async () => { await fetchStatus(); if ($('view-logs') && !$('view-logs').hidden) openLogStream(); });
+  // Override view to attach SSE when logs tab opens
+  const origView = view;
+  window.view = function(name) { origView(name); if (name === 'logs') setTimeout(openLogStream, 200); else closeLogStream(); };
+  // Click on engine-status pill navigates to logs
+  const engPill = $('engine-status');
+  if (engPill) engPill.addEventListener('click', () => { window.view('logs'); });
+  // Initial status
+  fetchStatus().then(() => { if ($('engine-status')) $('engine-status').textContent = 'Движок: ' + (document.documentElement.getAttribute('data-engine-state') || 'не проверено'); });
+})();
 
 /* ===== Theme toggle ===== */
 (function initThemeToggle() {

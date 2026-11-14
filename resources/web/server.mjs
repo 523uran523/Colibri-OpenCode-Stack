@@ -49,7 +49,7 @@ const providers = [
 ];
 for(const preset of providers)if(!preset.group)preset.group='advanced';
 await Promise.all([DATA, SKILLS, DEFAULT_MODELS, DEFAULT_WORKSPACE].map(p=>fs.mkdir(p,{recursive:true})));
-const defaults = {provider:'local',baseUrl:'',model:'local',connectionId:'',modelsDir:'resources/LLM',workspace:'workspace',localModelPath:'',juliaPath:'',claudePath:'',powershellPath:'',gitBashPath:'',engeeAccountUrl:'https://engee.com',engeeRuntimeUrl:'',apiKeys:{},engeeToken:'',engeeUsername:'',engeePassword:''};
+const defaults = {provider:'local',baseUrl:'',model:'local',connectionId:'',modelsDir:'resources/LLM',workspace:'workspace',localModelPath:'',juliaPath:'',claudePath:'',powershellPath:'',gitBashPath:'',engeeAccountUrl:'https://engee.com',engeeRuntimeUrl:'',apiKeys:{},engeeToken:'',engeeUsername:'',engeePassword:'',engeeEnabled:false};
 let config = {...defaults};
 const notices=[];
 try {config = {...defaults, ...JSON.parse(await fs.readFile(CONFIG,'utf8'))};} catch(e) {if(e.code !== 'ENOENT'){await fs.rename(CONFIG,CONFIG+'.invalid-'+Date.now());notices.push('Конфигурация повреждена. Сохранена резервная копия; настройте подключения в интерфейсе.');}}
@@ -70,6 +70,46 @@ let chats;
 let localProcess, localBase = '', localModel = '';
 let localStarting = false;
 let engeeAccess = '';
+
+// --- Engine management (Colibri + Proxy) ---
+const CALIBRI_ROOT = process.env.CALIBRI_ROOT || path.resolve(ROOT,'..','..','OneDrive\\Documents\\calibri');
+let COLIBRI_RUNTIME='colibri-v2.1.0';try{
+  const candidate=path.join(process.env.LOCALAPPDATA||'','colibri','runtime',COLIBRI_RUNTIME);
+  if(!existsSync(path.join(candidate,'coli')))throw new Error('no coli binary');
+  COLIBRI_RUNTIME=candidate;
+}catch(e){console.error('Runtime probe failed, falling back:',e.message);}
+const ENGINE_PORT = 8000;
+const PROXY_PORT = 8001;
+let engineProcess = null;
+let proxyProcess = null;
+let engineState = 'stopped'; // stopped | starting | running | error
+let engineLogBuffer = [];
+async function startEngine(){
+  if(engineState==='starting'||engineState==='running')throw fail('Движок уже запущен.',409);
+  engineState='starting';
+  const logsDir=path.join(DATA,'logs');await fs.mkdir(logsDir,{recursive:true});
+  const logFile=path.join(logsDir,'engine.log');
+  try{
+    const args=['serve','--model',path.join('G:\\','models','qwen3-coder-30b'),'--model-id','qwen3-coder-30b-a3b-colibri','--cap','32','--ctx','16384','--host','127.0.0.1','--port',String(ENGINE_PORT)];
+    engineProcess=spawn('py',['-3',path.join(COLIBRI_RUNTIME,'coli'),...args],{env:{...process.env,COLI_CUDA:'1',CUDA_DENSE:'1',CUDA_EXPERT_GB:'3',HEAT_FILE:'G:\\colibri_cache\\qwen.heat',COLI_CACHE_DIR:'G:\\colibri_cache',COLI_TOOL_FALLBACK:'1',COLI_CTX:'16384'},cwd:CALIBRI_ROOT,stdio:['ignore','pipe','pipe']});
+    engineProcess.stdout.on('data',d=>{engineLogBuffer.push(d.toString());if(engineLogBuffer.length>500)engineLogBuffer=engineLogBuffer.slice(-500);console.log('[engine]',d.toString().trim());});
+    engineProcess.stderr.on('data',d=>{engineLogBuffer.push('[err] '+d.toString());if(engineLogBuffer.length>500)engineLogBuffer=engineLogBuffer.slice(-500);});
+    engineProcess.on('close',code=>{engineState='stopped';engineProcess=null;proxyProcess?.kill();console.log('engine exited code='+code);});
+    await new Promise((resolve,reject)=>setTimeout(resolve,3000));
+    const h=await fetch(`http://127.0.0.1:${ENGINE_PORT}/health`).catch(()=>null);
+    if(h?.ok){
+      engineState='running';
+      proxyProcess=spawn('py',['-3',path.join(CALIBRI_ROOT,'tools','colibri_proxy.py'),`--listen=${PROXY_PORT}`,`--upstream-host=127.0.0.1`,`--upstream-port=${ENGINE_PORT}`,`--log`,path.join(CALIBRI_ROOT,'logs','proxy-requests.jsonl')],{cwd:CALIBRI_ROOT,stdio:['ignore','ignore','ignore']});
+      proxyProcess.on('error',()=>{});proxyProcess.on('close',()=>{engineState='stopped';engineProcess?.kill();});
+    }else{throw new Error('Colibri не ответил на /health через 3 сек.');}
+  }catch(e){engineState='error';console.error('startEngine failed:',e.message);}
+}
+async function stopEngine(){
+  if(proxyProcess){proxyProcess.kill();proxyProcess=null;}
+  if(engineProcess){engineProcess.kill();engineProcess=null;}
+  engineState='stopped';engineLogBuffer=[];
+}
+async function engineStatus(){return{state:engineState,logTail:engineLogBuffer.slice(-100).join('\n').toString()};}
 
 const fail = (message, status=400) => Object.assign(new Error(message),{status});
 const absolute = value => path.resolve(ROOT, String(value));
@@ -159,7 +199,7 @@ const KEEP_SECRET='__KEEP_SECRET__';
 function configEditor(){const document={...config,apiKeys:{...config.apiKeys}};for(const key of ['engeeToken','engeeUsername','engeePassword'])document[key]=config[key]?KEEP_SECRET:'';for(const key of Object.keys(document.apiKeys))document.apiKeys[key]=document.apiKeys[key]?KEEP_SECRET:'';return {path:'data/settings.json',document,secretsMasked:true};}
 async function saveEditor(document,{dryRun=false}={}){
   if(!document||typeof document!=='object'||Array.isArray(document))throw fail('Конфигурация должна быть объектом JSON.');
-  const allowed=['provider','baseUrl','model','connectionId','modelsDir','workspace','localModelPath','juliaPath','claudePath','powershellPath','gitBashPath','engeeAccountUrl','engeeRuntimeUrl','apiKeys','engeeToken','engeeUsername','engeePassword'];
+  const allowed=['provider','baseUrl','model','connectionId','modelsDir','workspace','localModelPath','juliaPath','claudePath','powershellPath','gitBashPath','engeeAccountUrl','engeeRuntimeUrl','apiKeys','engeeToken','engeeUsername','engeePassword','engeeEnabled','contextTokens','maxTokens','apiProxyEnabled','apiProxyPort'];
   if(Object.keys(document).some(k=>!allowed.includes(k)))throw fail('В конфигурации есть неизвестные поля.');
   const keys=document.apiKeys??configEditor().document.apiKeys;if(!keys||typeof keys!=='object'||Array.isArray(keys))throw fail('apiKeys должен быть объектом.');
   const nextKeys={};for(const [id,value] of Object.entries(keys)){if(!providers.some(p=>p.id===id)||typeof value!=='string'||value.length>16384)throw fail('Некорректный ключ нейросети.');const actual=value===KEEP_SECRET?config.apiKeys[id]:value.trim();if(actual)nextKeys[id]=actual;}
@@ -285,7 +325,7 @@ function toolsFor(target){
   }
   return base;
 }
-const systemPrompt = `Ты универсальный локальный AI-агент для кода. Отвечай по-русски. Доступна только явно выбранная рабочая папка. Не выдумывай результаты: используй инструменты и сообщай фактические ответы. Для кода используй встроенные функции. Не устанавливай пакеты и не подключай внешние сервисы без разрешения. Запись/запуск требуют подтверждения точного содержимого. Не читай секреты и системные файлы. Подключения пользователь задаёт через настройки. Доступные навыки перечислены ниже.`;
+const systemPrompt = `Ты универсальный AI-агент для работы с кодом и проектами. Отвечай по-русски. Доступна только явно выбранная рабочая папка. Не выдумывай результаты: используй инструменты и сообщай фактические ответы. Для кода используй встроенные функции. Не устанавливай пакеты и не подключай внешние сервисы без разрешения. Запись/запуск требуют подтверждения точного содержимого. Не читай секреты и системные файлы. Подключения пользователь задаёт через настройки. Доступные навыки перечислены ниже.`;
 function skillPath(name,relative='SKILL.md'){
   if(!/^[a-z0-9][a-z0-9-]{0,80}$/i.test(name))throw fail('Некорректное имя навыка.');
   if(typeof relative!=='string')throw fail('Некорректный путь.');
@@ -626,7 +666,7 @@ const server=http.createServer(async(req,res)=>{
       let page,status=200;try{if(url.searchParams.getAll('state').length!==1||url.searchParams.getAll('code').length>1||url.searchParams.getAll('error').length>1)throw fail('Не удалось подтвердить запрос входа OpenRouter. Начните подключение из Engee Agent.');page=openRouterAuth.callback({state:url.searchParams.get('state'),code:url.searchParams.get('code'),error:url.searchParams.get('error')});}catch(error){status=error.status||400;page=callbackPage(error.status?error.message:'Не удалось завершить вход OpenRouter. Повторите подключение.');}res.writeHead(status,page.headers);return res.end(page.html);
     }
     if(req.method==='GET' && route==='/api/state'){
-      const skills=await skillList(),julia=await juliaCapability({juliaPath:config.juliaPath||''});return send(res,200,{executionTargets:{engee:{available:true},julia},config:publicConfig(),providers,connections:connections.list(),notices,models:await models(),local:localState(),skills,workspaceFiles:(await listFiles()).files,systemPrompt:systemPrompt+'\n'+skills.map(s=>s.name+': '+s.title).join('\n')});
+      const skills=await skillList(),julia=await juliaCapability({juliaPath:config.juliaPath||''});return send(res,200,{executionTargets:{engee:{available:true},julia},config:publicConfig(),providers,connections:connections.list(),notices,models:await models(),local:localState(),skills,workspaceFiles:(await listFiles()).files,systemPrompt:systemPrompt+'\n'+skills.map(s=>s.name+': '+s.title).join('\n'),engine:{state:engineState}});
     }
     if(req.method==='GET' && route==='/api/llm/status'){
       const selected={provider:config.provider,model:config.model,connectionId:config.connectionId,baseUrl:config.baseUrl,modelsDir:config.modelsDir,localModelPath:config.localModelPath},profile=activeConnection(),preset=providers.find(item=>item.id===selected.provider);
@@ -659,6 +699,15 @@ const server=http.createServer(async(req,res)=>{
     if(req.method==='GET' && route==='/api/package'){const job=packages.get(url.searchParams.get('id'));if(!job)throw fail('Сборка не найдена.',404);return send(res,200,{id:job.id,status:job.status,personal:job.personal,error:job.error,downloadUrl:job.status==='ready'?'/api/package/download?id='+job.id:undefined});}
     if(req.method==='GET' && route==='/api/package/download'){const job=packages.get(url.searchParams.get('id'));if(!job||job.status!=='ready')throw fail('Архив ещё не готов.',404);res.writeHead(200,{'Content-Type':'application/zip','Content-Disposition':'attachment; filename="'+job.filename+'"','Cache-Control':'no-store'});createReadStream(job.file).pipe(res);return;}
     if(req.method==='GET' && route==='/api/files')return send(res,200,await listFiles(url.searchParams.get('path')||''));
+    if(req.method==='GET' && route==='/api/logs/stream'){
+      res.writeHead(200,{'Content-Type':'text/event-stream; charset=utf-8','Cache-Control':'no-store','Connection':'keep-alive','X-Content-Type-Options':'nosniff'});
+      const emit=(data)=>{if(!res.destroyed)res.write(`data: ${JSON.stringify(data)}\n\n`);};
+      emit({type:'init',log:engineLogBuffer.slice(-200).join('\n'),state:engineState});
+      const watcher=fs.watchFile(path.join(DATA,'logs','engine.log'),()=>{try{const lines=engineLogBuffer.slice(-500).join('\n');emit({type:'log',lines});}catch{};});
+      res.on('close',()=>{clearInterval(watcher);});
+      return;
+    }
+    if(req.method==='GET' && route==='/api/engine/status')return send(res,200,await engineStatus());
     if(req.method==='GET' && route==='/api/file')return send(res,200,await editorSave.read(url.searchParams.get('path')||''));
     if(req.method==='GET' && route.startsWith('/api/skills/'))return send(res,200,{content:await readText(skillPath(decodeURIComponent(route.slice(12))))});
     if(req.method==='GET' && route==='/docs/guide.pdf'){res.writeHead(302,{Location:'/help/guide.html#start','Cache-Control':'no-store'});return res.end();}
@@ -707,6 +756,8 @@ const server=http.createServer(async(req,res)=>{
       else if(route==='/api/tool')result=await prepareTool(body.name,body.arguments,body.executionTarget);
       else if(route==='/api/confirm'){const controller=new AbortController(),item={controller,provider:pending.get(body.id)?.name==='julia_eval_code'?'julia':'action'};requests.add(item);res.on('close',()=>{if(!res.writableEnded)controller.abort();});try{result=await confirm(body.id,body.allow===true,controller.signal);}finally{requests.delete(item);}}
       else if(route==='/api/skills')result=await prepareTool('save_skill',body);
+      else if(route==='/api/engine/start'){if(requests.size)throw fail('Завершите текущий запрос.',409);startEngine();result={state:'starting',message:'Движок запускается. Ожидайте загрузки модели (~1–3 минуты)…'};}
+      else if(route==='/api/engine/stop'){await stopEngine();result={state:'stopped',message:'Движок остановлен.'};}
       else if(route==='/api/shutdown'){
         if(requests.size)throw fail('Сначала завершите или остановите текущий запрос. Изменения и терминалы сохранены.',409);
         if(body.expectedSaveId){const receipt=saveReceipts.get(body.expectedSaveId);if(!receipt||receipt.expires<Date.now()||receipt.epoch!==mutationEpoch||receipt.revision!==chats.revision()||receipt.workspace!==config.workspace||receipt.configHash!==createHash('sha256').update(JSON.stringify(config)).digest('hex'))throw fail('Состояние изменилось после сохранения. Повторите сохранение перед выходом.',409);noLinks(DATA,CONFIG);noLinks(DATA,path.join(DATA,'connections.json'));noLinks(DATA,path.join(DATA,'chats.json'));if(receipt.connectionsHash!==await fingerprint(path.join(DATA,'connections.json'))||receipt.chatsHash!==await fingerprint(path.join(DATA,'chats.json')))throw fail('Локальные подключения или история изменились после сохранения. Повторите сохранение.',409);if(receipt.settingsHash!==await fingerprint(CONFIG))throw fail('Локальные настройки изменились после сохранения. Повторите сохранение.',409);for(const item of receipt.files){noLinks(absolute(config.workspace),item.target);if(item.hash!==await fingerprint(item.target))throw fail('Сохранённый файл изменился на диске. Повторите просмотр перед выходом.',409);}}
