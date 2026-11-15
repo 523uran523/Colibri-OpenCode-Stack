@@ -83,6 +83,8 @@ const PROXY_PORT = 8001;
 let engineProcess = null;
 let proxyProcess = null;
 let engineState = 'stopped'; // stopped | starting | running | error
+let ctxTokens = 0; // cumulative token usage for the current chat session
+let chatHistory = []; // server-side chat history (mirrors frontend)
 let engineLogBuffer = [];
 async function startEngine(){
   if(engineState==='starting'||engineState==='running')throw fail('Движок уже запущен.',409);
@@ -685,6 +687,16 @@ const server=http.createServer(async(req,res)=>{
     // GET /api/config — current config (public fields only)
     if(req.method==='GET' && route==='/api/config')
       return send(res, 200, { baseUrl: config.baseUrl, model: config.model, maxTokens: config.maxTokens || 4096, provider: config.provider, workspace: config.workspace });
+
+    // ─── Context tracking ──────────────────────────────────────────
+    // Tracks cumulative tokens used in the current chat session.
+    // /api/chat increments `ctxTokens` after each LLM call.
+    if(req.method==='GET' && route==='/api/context/stats')
+      return send(res, 200, {
+        current_tokens: ctxTokens,
+        max_tokens: 16384,
+        pct: Math.min(100, Math.round(ctxTokens / 16384 * 100)),
+      });
     // GET /api/skills — list skill names
     if(req.method==='GET' && route==='/api/skills'){
       const list = await skillList();
@@ -703,38 +715,262 @@ const server=http.createServer(async(req,res)=>{
     // GET /api/logs — last 300 lines of engine log buffer
     if(req.method==='GET' && route==='/api/logs')
       return send(res, 200, { tail: engineLogBuffer.slice(-300).join('\n'), state: engineState });
-    // POST /api/chat — simple one-shot chat (no tools, no multi-turn state)
+    // POST /api/chat — agent chat with tools
     if(req.method==='POST' && route==='/api/chat'){
       let body;
       try { body = await readBody(req); } catch { body = {}; }
-      // Sanitize: remove empty messages, strip thinking tags
       let messages = Array.isArray(body.messages) ? body.messages : [];
       messages = messages
         .filter(m => m.content !== undefined && String(m.content).trim() !== '')
         .map(m => ({ ...m, content: String(m.content).replace(/<think[^>]*>[\s\S]*?<\/think>/gi, '').trim() }))
         .filter(m => String(m.content).trim() !== '');
       if (messages.length === 0) return send(res, 400, { error: 'Нет сообщений для отправки' });
+
+      // Build the agent system prompt
+      const wsPath = absolute(config.workspace);
+      const skills = await skillList();
+      const agentSystem = [
+        'Ты — Agent Lite, локальный агент-программист. Ты работаешь прямо в рабочей папке пользователя.',
+        '',
+        `Твоя рабочая папка: ${wsPath}`,
+        '',
+        'У тебя ЕСТЬ доступ к файлам. НИКОГДА не говори, что у тебя нет доступа. Вместо этого используй инструменты.',
+        '',
+        'Правила:',
+        '- Если тебя просят прочитать файл — вызови инструмент read или grep, а не проси пользователя скопировать текст.',
+        '- Если нужно исправить код — используй edit (точечная замена) или write (новый файл).',
+        '- Если нужно выполнить команду (node --check, git status) — используй bash.',
+        '- Если файл длинный — читай его кусками через read с offset/limit.',
+        '- Всегда подтверждай результат: что ты изменил и где.',
+        '',
+        'Доступные навыки:',
+        ...skills.map(s => `  ${s.name} — ${s.description}`),
+      ].join('\n');
+
+      const base = (config.baseUrl || 'http://127.0.0.1:8001/v1').replace(/\/v1$/,'');
+      const model  = body.model || config.model || 'qwen3-coder-30b-a3b-colibri';
+      const maxTok = body.max_tokens || config.maxTokens || 4096;
+
+      // Tools the proxy will forward (matches KEEP_TOOLS in colibri_proxy.py)
+      const agentTools = [
+        tool('read','Прочитать файл из рабочей папки.',{path:str('Путь к файлу, можно с offset/limit для длинных файлов.'),offset:{type:'integer',description:'С какой строки читать.'},limit:{type:'integer',description:'Сколько строк читать.'}},['path']),
+        tool('write','Создать или перезаписать файл.',{path:str('Путь к файлу.'),content:str('Полное содержимое файла.')},['path','content']),
+        tool('edit','Точечная замена в файле.',{path:str('Путь к файлу.'),old_string:str('Точный текст для поиска.'),new_string:str('Замена.')},['path','old_string','new_string']),
+        tool('list','Список файлов в папке.',{path:str('Папка, пусто для корня.')}),
+        tool('grep','Поиск по файлам.',{pattern:str('Регулярное выражение или текст.'),path:str('Файл или папка.'),include:str('Фильтр файлов (например *.js).')},['pattern']),
+        tool('bash','Выполнить команду.',{command:str('Команда в терминале.'),workdir:str('Рабочая папка, по умолчанию workspace.')},['command']),
+      ];
+
+      const toolEvents = [];
+      let fullMessages = [{ role: 'system', content: agentSystem }, ...messages];
+
       try {
-        const base = (config.baseUrl || 'http://127.0.0.1:8001/v1').replace(/\/v1$/,'');
-        const model  = body.model || config.model || 'qwen3-coder-30b-a3b-colibri';
-        const maxTok = body.max_tokens || config.maxTokens || 4096;
-        const resp = await fetch(base + '/v1/chat/completions', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model, messages, max_tokens: maxTok, stream: false, enable_thinking: false }),
-          signal: AbortSignal.timeout(120_000),
-        });
-        if (!resp.ok) {
-          const errText = await resp.text().catch(()=> '');
-          return send(res, 502, { error: `Upstream ${resp.status}: ${errText.slice(0,300)}` });
+        for (let round = 0; round < 8; round++) {
+          const resp = await fetch(base + '/v1/chat/completions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              model,
+              messages: fullMessages,
+              max_tokens: maxTok,
+              stream: false,
+              enable_thinking: false,
+              tools: agentTools,
+              tool_choice: 'auto',
+            }),
+            signal: AbortSignal.timeout(180_000),
+          });
+          if (!resp.ok) {
+            const errText = await resp.text().catch(() => '');
+            return send(res, 502, { error: `Upstream ${resp.status}: ${errText.slice(0, 300)}` });
+          }
+          const data = await resp.json();
+          const choice = data.choices?.[0];
+
+          if (!choice) return send(res, 502, { error: 'Пустой ответ от модели' });
+
+          // Model wants to call a tool
+          if (choice.message?.tool_calls?.length > 0) {
+            fullMessages.push({ role: 'assistant', content: choice.message.content || '', tool_calls: choice.message.tool_calls });
+            for (const tc of choice.message.tool_calls) {
+              const fnName = tc.function?.name || '';
+              let args = {};
+              try { args = JSON.parse(tc.function?.arguments || '{}'); } catch { args = { raw: tc.function?.arguments }; }
+
+              const evt = { tool: fnName, args, round };
+              toolEvents.push(evt);
+
+              let toolResult;
+              try {
+                switch (fnName) {
+                  case 'read': {
+                    const p = workspacePath(String(args.path || '').trim());
+                    let text = await readText(p);
+                    const lines = text.split('\n');
+                    const off = Math.max(0, parseInt(args.offset, 10) || 0);
+                    const lim = args.limit ? Math.min(parseInt(args.limit, 10), lines.length) : lines.length;
+                    text = lines.slice(off, off + lim).join('\n');
+                    toolResult = text;
+                    break;
+                  }
+                  case 'write': {
+                    const p = workspacePath(String(args.path || '').trim());
+                    await fs.mkdir(path.dirname(p), { recursive: true });
+                    await fs.writeFile(p, String(args.content || ''), 'utf8');
+                    toolResult = `Файл ${args.path} записан (${String(args.content || '').length} байт).`;
+                    break;
+                  }
+                  case 'edit': {
+                    const p = workspacePath(String(args.path || '').trim());
+                    const oldStr = String(args.old_string || '');
+                    const newStr = String(args.new_string || '');
+                    let fileContent = await fs.readFile(p, 'utf8');
+                    const idx = fileContent.indexOf(oldStr);
+                    if (idx === -1) { toolResult = `Ошибка: old_string не найден в ${args.path}. Проверь точный текст через read или grep.`; break; }
+                    if (fileContent.indexOf(oldStr, idx + 1) !== -1) { toolResult = `Ошибка: old_string встречается более одного раза в ${args.path}. Уточни якорь.`; break; }
+                    fileContent = fileContent.replace(oldStr, newStr);
+                    await fs.writeFile(p, fileContent, 'utf8');
+                    toolResult = `Заменено в ${args.path} на строке ${fileContent.slice(0, idx).split('\n').length}.`;
+                    break;
+                  }
+                  case 'list': {
+                    const p = workspacePath(String(args.path || '').trim());
+                    const entries = await fs.readdir(p, { withFileTypes: true });
+                    toolResult = entries.map(e => (e.isDirectory() ? '[DIR] ' : '') + e.name).join('\n');
+                    break;
+                  }
+                  case 'grep': {
+                    const p = workspacePath(String(args.path || '').trim());
+                    const pattern = String(args.pattern || '');
+                    const results = [];
+                    if (fs.existsSync(p) && fs.lstatSync(p).isFile()) {
+                      const lines = (await fs.readFile(p, 'utf8')).split('\n');
+                      lines.forEach((line, i) => { if (line.includes(pattern)) results.push(`L${i + 1}: ${line.trim()}`); });
+                      toolResult = results.length ? results.join('\n') : 'Совпадений нет';
+                    } else {
+                      // Simple recursive grep (first 20 matches)
+                      const walk = async (dir, depth = 0) => {
+                        if (depth > 3 || results.length >= 20) return;
+                        for (const e of await fs.readdir(dir, { withFileTypes: true })) {
+                          if (results.length >= 20) break;
+                          const fp = path.join(dir, e.name);
+                          if (e.isDirectory()) await walk(fp, depth + 1);
+                          else if (/\.(js|ts|html|css|json|md|py|sh|yml|yaml|toml|ini|cfg)$/i.test(e.name)) {
+                            try {
+                              const lines = (await fs.readFile(fp, 'utf8')).split('\n');
+                              lines.forEach((line, li) => {
+                                if (results.length < 20 && line.includes(pattern)) results.push(`${fp}:${li + 1}: ${line.trim()}`);
+                              });
+                            } catch {}
+                          }
+                        }
+                      };
+                      await walk(p);
+                      toolResult = results.length ? results.join('\n') : 'Совпадений нет';
+                    }
+                    break;
+                  }
+                  case 'bash': {
+                    const cmd = String(args.command || '');
+                    const cwd = args.workdir ? workspacePath(String(args.workdir)) : absolute(config.workspace);
+                    const { exec } = await import('node:child_process');
+                    const { promisify } = await import('node:util');
+                    const pExec = promisify(exec);
+                    const result = await pExec(cmd, { cwd, timeout: 30_000, maxBuffer: 1024 * 1024 });
+                    toolResult = (result.stdout || result.stderr || '').trim() || '(пусто)';
+                    break;
+                  }
+                  default:
+                    toolResult = `Неизвестный инструмент: ${fnName}`;
+                }
+              } catch (e) {
+                toolResult = `Ошибка: ${e.message}`;
+              }
+              evt.result = String(toolResult).slice(0, 2000);
+              fullMessages.push({ role: 'tool', tool_call_id: tc.id, content: String(toolResult) });
+            }
+            continue; // Next round: model sees tool results
+          }
+
+          // Final answer
+          const reply = choice.message?.content ?? JSON.stringify(data);
+          // Track token usage
+          const usage = data.usage;
+          if (usage) ctxTokens += (usage.prompt_tokens || 0) + (usage.completion_tokens || 0);
+          // Store the full conversation (user messages + final reply)
+          chatHistory.push(...messages, { role: 'assistant', content: reply });
+          return send(res, 200, {
+            choices: [{ message: { role: 'assistant', content: reply } }],
+            tool_events: toolEvents,
+            total_rounds: round + 1,
+            usage: {
+              current_tokens: ctxTokens,
+              max_tokens: 16384,
+              pct: Math.min(100, Math.round(ctxTokens / 16384 * 100)),
+            },
+          });
         }
-        const data = await resp.json();
-        return send(res, 200, data);
+        return send(res, 502, { error: 'Слишком много раундов инструментов (макс. 8)' });
       } catch (e) {
-        return send(res, 502, { error: e.message });
+        return send(res, 502, { error: e.message, tool_events: toolEvents });
       }
     }
-    // POST /api/file/save — write file to workspace
+    // POST /api/context/compact — summarize old messages, keep last N
+    if(req.method==='POST' && route==='/api/context/compact'){
+      if (chatHistory.length < 4) return send(res, 200, { compacted: false, message: 'История слишком короткая для сжатия' });
+      // Keep last 3 messages
+      const keep = chatHistory.slice(-3);
+      const toSummarize = chatHistory.slice(0, -3);
+      try {
+        const base = (config.baseUrl || 'http://127.0.0.1:8001/v1').replace(/\/v1$/,'');
+        const model = config.model || 'qwen3-coder-30b-a3b-colibri';
+        const summaryPrompt = 'Кратко суммаризируй этот диалог. Сохрани все важные технические решения, имена файлов и изменения в коде. Формат: нумерованный список ключевых фактов.';
+        const sumResp = await fetch(base + '/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model,
+            messages: [
+              { role: 'system', content: summaryPrompt },
+              ...toSummarize,
+            ],
+            max_tokens: 512,
+            stream: false,
+            enable_thinking: false,
+          }),
+          signal: AbortSignal.timeout(60_000),
+        });
+        if (!sumResp.ok) throw new Error(`Summarize failed: HTTP ${sumResp.status}`);
+        const sumData = await sumResp.json();
+        const summary = sumData.choices?.[0]?.message?.content || '(не удалось суммаризировать)';
+        // Replace old history with summary + last 3
+        chatHistory = [
+          { role: 'system', content: `Краткое содержание предыдущего диалога:\n${summary}` },
+          ...keep,
+        ];
+        ctxTokens = 0; // reset counter
+        return send(res, 200, {
+          compacted: true,
+          summary: summary.slice(0, 500),
+          kept_messages: keep.length,
+          usage: {
+            current_tokens: ctxTokens,
+            max_tokens: 16384,
+            pct: 0,
+          },
+          new_history: chatHistory,
+        });
+      } catch (e) {
+        return send(res, 502, { error: `Ошибка сжатия: ${e.message}` });
+      }
+    }
+
+    // POST /api/context/reset — clear chat history
+    if(req.method==='POST' && route==='/api/context/reset'){
+      ctxTokens = 0;
+      chatHistory = [];
+      return send(res, 200, { reset: true, usage: { current_tokens: 0, max_tokens: 16384, pct: 0 } });
+    }
     if(req.method==='POST' && route==='/api/file/save'){
       let body;
       try { body = await readBody(req); } catch { body = {}; }

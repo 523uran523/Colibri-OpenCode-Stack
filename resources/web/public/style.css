@@ -171,6 +171,41 @@ code { background: var(--surface-2); padding: 1px 5px; border-radius: 3px; font-
   word-break: break-word;
   max-width: 85%;
 }
+.msg--system .msg__bubble {
+  background: var(--surface-2);
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--muted);
+  max-width: 90%;
+}
+
+/* ── Tool-call events ─────────────────────── */
+.msg--tools {
+  margin: 4px 0 10px;
+}
+.msg--tools .msg__role {
+  font-size: 10px;
+  color: var(--muted);
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+}
+.tool-event {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-family: "Cascadia Code", "JetBrains Mono", monospace;
+  color: var(--muted);
+  margin-bottom: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tool-event b { color: var(--accent); font-weight: 600; }
 
 .thinking {
   padding: 8px 0;
@@ -370,14 +405,68 @@ code { background: var(--surface-2); padding: 1px 5px; border-radius: 3px; font-
 }
 .files-bar input:focus { outline: none; border-color: var(--accent); }
 
-.fs-ws-label {
+/* ── Context ring ─────────────────────────── */
+.ctx {
+  position: relative;
+  width: 44px; height: 44px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--accent);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: color .2s, border-color .2s;
+}
+.ctx__ring {
+  position: absolute;
+  inset: 0;
+  width: 100%; height: 100%;
+}
+.ctx__ring-fg {
+  transition: stroke-dasharray .4s ease;
+}
+.ctx__label {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text);
+  z-index: 1;
+}
+.ctx--warn { color: var(--warn); border-color: var(--warn); }
+.ctx--crit { color: var(--error); border-color: var(--error); animation: pulse 1s infinite; }
+.ctx--busy { pointer-events: none; opacity: .6; }
+
+/* ── Files modal: project switcher ────────── */
+.files-bar__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.files-bar__row input {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 7px 10px;
+  color: var(--text);
+  font-size: 13px;
+}
+.files-bar__row input:focus { outline: none; border-color: var(--accent); }
+.files-label {
   font-size: 11px;
   color: var(--muted);
-  max-width: 240px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  width: 44px;
+  flex-shrink: 0;
 }
+.fs-result {
+  font-size: 12px;
+  color: var(--muted);
+}
+.fs-result--ok  { color: var(--success); }
+.fs-result--err { color: var(--error); }
+
 
 .files-grid {
   display: grid;

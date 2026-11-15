@@ -23,6 +23,15 @@
     </div>
 
     <div class="hdr__right">
+      <!-- Context ring -->
+      <button id="ctx-btn" class="ctx" title="Контекст: нажмите для сжатия">
+        <svg class="ctx__ring" viewBox="0 0 36 36">
+          <path class="ctx__ring-bg"  d="M18 2.0845a 15.9155 15.9155 0 0 1 0 31.831 15.9155 15.9155 0 0 1 0-31.831" fill="none" stroke="currentColor" stroke-width="3" opacity=".25"/>
+          <path class="ctx__ring-fg"  d="M18 2.0845a 15.9155 15.9155 0 0 1 0 31.831 15.9155 15.9155 0 0 1 0-31.831" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="0, 100" stroke-linecap="round" transform="rotate(-90 18 18)"/>
+        </svg>
+        <span class="ctx__label" id="ctx-label">0%</span>
+      </button>
+
       <div class="hdr__status">
         <span class="dot" id="engine-dot"></span>
         <span id="engine-label">Не запущен</span>
@@ -100,9 +109,17 @@
       </div>
       <div class="modal__body">
         <div class="files-bar">
-          <span id="fs-ws-label" class="fs-ws-label"></span>
-          <input id="fs-path" type="text" placeholder="папка внутри проекта">
-          <button id="fs-go" class="btn btn--primary">Открыть</button>
+          <div class="files-bar__row">
+            <label class="files-label">Проект</label>
+            <input id="fs-root" type="text" placeholder="C:\Users\...\Project" title="Корневая папка проекта">
+            <button id="fs-root-go" class="btn btn--primary" title="Сменить проект">Сменить проект</button>
+          </div>
+          <div class="files-bar__row">
+            <label class="files-label">Внутри</label>
+            <input id="fs-path" type="text" placeholder="папка внутри проекта">
+            <button id="fs-go" class="btn btn--primary">Открыть</button>
+          </div>
+          <span id="fs-result" class="fs-result"></span>
         </div>
         <div class="files-grid">
           <div id="fs-list" class="files-list"></div>
