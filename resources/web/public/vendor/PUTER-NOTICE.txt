@@ -1,5 +1,0 @@
-Puter.js SDK, Copyright 2024-present Puter Technologies Inc.
-Source snapshot downloaded 2026-10-08 from https://js.puter.com/v2/
-Project: https://github.com/HeyPuter/puter/tree/main/src/puter-js
-The SDK README specifies Apache-2.0. Apache license text is included here.
-This SDK is bundled locally; cloud authentication and AI still use Puter servers.

@@ -1,4 +1,0 @@
-interface:
-  display_name: "Engee Fixed-Point Conversion"
-  short_description: "Propose and verify fixed-point types in Engee"
-  default_prompt: "Use $engee-fixed-point-conversion to propose fixed-point types for an Engee model and verify the converted simulation."

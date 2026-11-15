@@ -1,23 +1,23 @@
-# Engee Agent Lite — .gitignore
-# Secrets / local data
+# Secrets / local data (never commit)
 data/
 *.log
 !README.md
 
-# Bundled runtimes (large, not under VCS)
-resources/runtime/node/
-resources/runtime/llama/
+# Bundled runtimes (large binaries, not under VCS)
 resources/runtime/node.exe
 resources/runtime/node-pty/
-resources/LLM/*.gguf
-resources/LLM/*.bin
-resources/LLM/*.safetensors
+resources/runtime/launcher/
+resources/runtime/llama/
+resources/LLM/
 
-# Engee Julia blocks (huge, optional module only)
-resources/skills/engee-blocks/all_blocks/
-resources/skills/engee-blocks/doc/
-resources/skills/engee-api/scripts/
+# Optional Engee module (disabled by default, contains secrets and huge Julia blocks)
+resources/skills/engee-*/
+resources/web/engee-*.mjs
+EngeeAgent.exe
+Start-EngeeAgent.cmd
+start-engee-agent.sh
 
 # Build outputs
 Build-Personal-ZIP.cmd
+Build-Public-ZIP.cmd
 *.zip

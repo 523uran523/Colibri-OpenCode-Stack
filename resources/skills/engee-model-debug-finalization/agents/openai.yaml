@@ -1,4 +1,0 @@
-interface:
-  display_name: "Engee Model Debug Finalization"
-  short_description: "Checkpoint and hand off an Engee model debugging session."
-  default_prompt: "Finalize the current Engee model debugging session safely: choose a verified checkpoint, record project state, summarize iterations, and capture workflow improvement recommendations."
