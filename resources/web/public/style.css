@@ -475,6 +475,15 @@ code { background: var(--surface-2); padding: 1px 5px; border-radius: 3px; font-
   background: var(--border);
   color: var(--text);
 }
+.sk-desc {
+  font-size: 10px;
+  color: var(--muted);
+  opacity: .7;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .sk-view {
   display: flex;
   flex-direction: column;

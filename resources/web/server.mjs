@@ -283,7 +283,12 @@ async function skillList(){
   const list=[];
   for(const entry of await fs.readdir(SKILLS,{withFileTypes:true})) if(entry.isDirectory() && !entry.isSymbolicLink()) {
     if(config.engeeEnabled !== true && entry.name.startsWith('engee-')) continue;
-    try{const content=await fs.readFile(path.join(SKILLS,entry.name,'SKILL.md'),'utf8');const title=content.match(/^#\s+(.+)$/m)?.[1]||entry.name;list.push({name:entry.name,title});}catch{}
+    try{
+      const content=await fs.readFile(path.join(SKILLS,entry.name,'SKILL.md'),'utf8');
+      const title=content.match(/^#\s+(.+)$/m)?.[1]||entry.name;
+      const desc=content.match(/^description:\s*(.+)$/m)?.[1]||title;
+      list.push({name:entry.name,title,description:desc});
+    }catch{}
   }
   return list.sort((a,b)=>a.name.localeCompare(b.name));
 }

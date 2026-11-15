@@ -372,7 +372,7 @@ async function loadSkills() {
     skills.forEach(s => {
       const li = document.createElement('li');
       li.textContent = s.name;
-      li.title = s.title || s.name;
+      li.title = s.description || s.title || s.name;
       li.addEventListener('click', async () => {
         skList.querySelectorAll('li').forEach(x => x.classList.remove('sel'));
         li.classList.add('sel');
@@ -389,6 +389,11 @@ async function loadSkills() {
           skBody.textContent = 'Ошибка: ' + e.message;
         }
       });
+      // Add a small description below the name
+      const desc = document.createElement('div');
+      desc.className = 'sk-desc';
+      desc.textContent = s.description || s.title || '';
+      li.appendChild(desc);
       skList.appendChild(li);
     });
   } catch (e) {
