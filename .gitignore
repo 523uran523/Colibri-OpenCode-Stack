@@ -21,3 +21,5 @@ start-engee-agent.sh
 Build-Personal-ZIP.cmd
 Build-Public-ZIP.cmd
 *.zip
+
+resources/web/public/vendor/
