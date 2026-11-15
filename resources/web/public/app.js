@@ -1,68 +1,85 @@
 /**
- * Agent Lite — minimal front-end
- * Connects to /api/* endpoints served by server.mjs
+ * Agent Lite v3 — SPA with modals
+ * Main screen: Chat only. Settings / Files / Skills / Logs open as modals.
  */
 
 const $ = s => document.querySelector(s);
+const $$ = s => document.querySelectorAll(s);
 
-// ── Theme ──────────────────────────────────────────────────────────
-const themeBtn = $('#theme-btn');
+// ── Modal helpers ──────────────────────────────────────────────────
+function openModal(name) {
+  const el = $(`#modal-${name}`);
+  if (!el) return;
+  el.hidden = false;
+  // Focus first input
+  const inp = el.querySelector('input, textarea, button:not(.modal__close)');
+  if (inp) setTimeout(() => inp.focus(), 50);
+}
+function closeModal(name) {
+  const el = $(`#modal-${name}`);
+  if (el) el.hidden = true;
+}
+// Wire up close buttons and overlay click
+$$('.modal__close').forEach(btn => {
+  btn.addEventListener('click', () => closeModal(btn.dataset.close));
+});
+$$('.modal-overlay').forEach(ov => {
+  ov.addEventListener('click', e => {
+    if (e.target === ov) {
+      // Close whichever modal this overlay belongs to
+      const id = ov.id.replace('modal-', '');
+      closeModal(id);
+    }
+  });
+});
+// Escape key closes open modal
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    $$('.modal-overlay:not([hidden])').forEach(ov => {
+      closeModal(ov.id.replace('modal-', ''));
+    });
+  }
+});
+
+// Open modals from header icons
+$('#btn-settings').addEventListener('click', () => openModal('settings'));
+$('#btn-files').addEventListener('click', () => { loadFiles(); openModal('files'); });
+$('#btn-skills').addEventListener('click', () => { loadSkills(); openModal('skills'); });
+$('#btn-logs').addEventListener('click', () => { refreshLogs(); openModal('logs'); });
+
+// ── Theme ─────────────────────────────────────────────────────────
 const saved = localStorage.getItem('agentlite-theme') || 'dark';
 document.documentElement.dataset.theme = saved;
-themeBtn.addEventListener('click', () => {
+$('#theme-btn').addEventListener('click', () => {
   const cur = document.documentElement.dataset.theme;
   const next = cur === 'light' ? 'dark' : 'light';
   document.documentElement.dataset.theme = next;
   localStorage.setItem('agentlite-theme', next);
 });
 
-// ── Navigation ─────────────────────────────────────────────────────
-const views = document.querySelectorAll('.view');
-const navBtns = document.querySelectorAll('.nav__btn');
-
-function switchView(name) {
-  views.forEach(v => v.hidden = v.id !== `view-${name}`);
-  navBtns.forEach(b => b.classList.toggle('active', b.dataset.view === name));
-  if (name === 'logs') refreshLogs();
-  if (name === 'skills') loadSkills();
-  if (name === 'files')  loadFiles();
-}
-navBtns.forEach(b => b.addEventListener('click', () => switchView(b.dataset.view)));
-
-// ── Engine status ──────────────────────────────────────────────────
+// ── Engine status ─────────────────────────────────────────────────
 const engineDot   = $('#engine-dot');
 const engineLabel = $('#engine-label');
 const btnStart    = $('#btn-start');
 const btnStop     = $('#btn-stop');
 const engPanelDot   = $('#eng-panel-dot');
 const engPanelLabel = $('#eng-panel-label');
-const engStartBtn   = $('#eng-start-btn');
-const engStopBtn    = $('#eng-stop-btn');
 
 function setEngineState(state, label) {
   engineDot.className = 'dot';
-  if (state === 'on')  engineDot.classList.add('dot--on');
-  if (state === 'run') engineDot.classList.add('dot--run');
-  if (state === 'err') engineDot.classList.add('dot--err');
+  engPanelDot.className = 'dot';
+  if (state === 'on')  { engineDot.classList.add('dot--on');  engPanelDot.classList.add('dot--on'); }
+  if (state === 'run') { engineDot.classList.add('dot--run'); engPanelDot.classList.add('dot--run'); }
+  if (state === 'err') { engineDot.classList.add('dot--err'); engPanelDot.classList.add('dot--err'); }
   engineLabel.textContent = label;
+  engPanelLabel.textContent = label;
   btnStart.disabled = state === 'on' || state === 'run';
   btnStop.disabled  = !(state === 'on');
-  engPanelDot.className = 'dot';
-  if (state === 'on')  engPanelDot.classList.add('dot--on');
-  if (state === 'run') engPanelDot.classList.add('dot--run');
-  if (state === 'err') engPanelDot.classList.add('dot--err');
-  engPanelLabel.textContent = label;
-  engStartBtn.disabled = state === 'on' || state === 'run';
-  engStopBtn.disabled  = !(state === 'on');
 }
-
-engStartBtn.addEventListener('click', () => btnStart.click());
-engStopBtn.addEventListener('click', () => btnStop.click());
 
 async function checkEngine() {
   try {
-    const r = await fetch('/api/health');
-    await r.json();
+    await fetch('/api/health');
     const llm = await fetch('/api/probe').then(x => x.json()).catch(() => ({}));
     if (llm.error) setEngineState('err', 'Прокси недоступен');
     else setEngineState('on', llm.model || 'Qwen готов');
@@ -89,19 +106,20 @@ btnStart.addEventListener('click', async () => {
 
 btnStop.addEventListener('click', async () => {
   setEngineState('run', 'Остановка…');
-  try { await fetch('/api/engine/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); }
-  catch {}
+  try {
+    await fetch('/api/engine/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  } catch {}
   setEngineState('', 'Остановлен');
 });
 
-// ── Chat ───────────────────────────────────────────────────────────
-const msgs     = $('#msgs');
-const form     = $('#chat-form');
-const promptEl = $('#prompt');
-const thinking = $('#thinking');
-const thinkingText = $('#thinking-text');
-const sendBtn  = $('#send-btn');
-const stopBtn  = $('#stop-btn');
+// ── Chat ──────────────────────────────────────────────────────────
+const msgs       = $('#msgs');
+const form       = $('#chat-form');
+const promptEl   = $('#prompt');
+const thinking   = $('#thinking');
+const thinkingTx = $('#thinking-text');
+const sendBtn    = $('#send-btn');
+const stopBtn    = $('#stop-btn');
 
 let history = [];
 
@@ -131,7 +149,7 @@ form.addEventListener('submit', async e => {
   history.push({ role: 'user', content: text });
 
   thinking.hidden = false;
-  thinkingText.textContent = 'Модель думает…';
+  thinkingTx.textContent = 'Модель думает…';
   sendBtn.disabled = true;
   stopBtn.hidden = false;
 
@@ -154,16 +172,22 @@ form.addEventListener('submit', async e => {
     bubble.textContent = reply;
     history.push({ role: 'assistant', content: reply });
   } catch (err) {
-    if (aborted) bubble.textContent = '⏹ Остановлено';
-    else { bubble.textContent = `Ошибка: ${err.message}`; bubble.style.color = 'var(--error)'; }
+    if (aborted) {
+      bubble.textContent = '⏹ Остановлено';
+    } else {
+      bubble.textContent = `Ошибка: ${err.message}`;
+      bubble.style.color = 'var(--error)';
+    }
   } finally {
     thinking.hidden = true;
     sendBtn.disabled = false;
     stopBtn.hidden = true;
+    stopBtn.onclick = null;
     msgs.scrollTop = msgs.scrollHeight;
   }
 });
 
+// Attach file
 $('#attach-btn').addEventListener('click', () => $('#attach-input').click());
 $('#attach-input').addEventListener('change', async e => {
   for (const f of e.target.files) {
@@ -173,22 +197,21 @@ $('#attach-input').addEventListener('change', async e => {
   e.target.value = '';
 });
 
-// ── Settings ──────────────────────────────────────────────────────
+// ── Settings modal ────────────────────────────────────────────────
 const cfgBase      = $('#cfg-base');
 const cfgModel     = $('#cfg-model');
 const cfgTokens    = $('#cfg-tokens');
 const cfgWorkspace = $('#cfg-workspace');
 const cfgResult    = $('#cfg-result');
 
-// Load current settings
+// Load config on startup
 fetch('/api/config').then(r => r.json()).then(d => {
   if (d.baseUrl)   cfgBase.value      = d.baseUrl;
   if (d.model)     cfgModel.value     = d.model;
   if (d.maxTokens) cfgTokens.value    = d.maxTokens;
   if (d.workspace) cfgWorkspace.value = d.workspace;
-  // Update the Files tab label
-  const fsWs = $('#fs-ws-label');
-  if (fsWs && d.workspace) fsWs.textContent = d.workspace;
+  const wsLabel = $('#fs-ws-label');
+  if (wsLabel && d.workspace) wsLabel.textContent = d.workspace;
 }).catch(() => {});
 
 $('#cfg-probe').addEventListener('click', async () => {
@@ -199,8 +222,8 @@ $('#cfg-probe').addEventListener('click', async () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        baseUrl: cfgBase.value.trim(),
-        model:   cfgModel.value.trim(),
+        baseUrl:   cfgBase.value.trim(),
+        model:     cfgModel.value.trim(),
         maxTokens: parseInt(cfgTokens.value, 10) || 4096,
       }),
     });
@@ -230,28 +253,29 @@ $('#cfg-save').addEventListener('click', async () => {
         workspace: cfgWorkspace.value.trim(),
       }),
     });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({}));
+      throw new Error(d.error || `HTTP ${r.status}`);
+    }
     cfgResult.textContent = '✓ Сохранено';
     cfgResult.className = 'set-result set-result--ok';
-    // Update the Files tab label
-    const fsWs = $('#fs-ws-label');
-    if (fsWs) fsWs.textContent = cfgWorkspace.value.trim();
+    const wsLabel = $('#fs-ws-label');
+    if (wsLabel) wsLabel.textContent = cfgWorkspace.value.trim();
   } catch (e) {
     cfgResult.textContent = `✗ ${e.message}`;
     cfgResult.className = 'set-result set-result--err';
   }
 });
 
-// ── Files ──────────────────────────────────────────────────────────
-const fsList     = $('#fs-list');
-const fsName     = $('#fs-name');
-const fsContent  = $('#fs-content');
-const fsPath     = $('#fs-path');
-
+// ── Files modal ───────────────────────────────────────────────────
+const fsList   = $('#fs-list');
+const fsName   = $('#fs-name');
+const fsContent = $('#fs-content');
+const fsPath   = $('#fs-path');
 let curFile = '';
 
 async function loadFiles() {
-  const p = fsPath.value.trim(); // empty = root of configured workspace
+  const p = fsPath.value.trim();
   try {
     const r = await fetch(`/api/files${p ? `?path=${encodeURIComponent(p)}` : ''}`);
     const d = await r.json();
@@ -267,14 +291,12 @@ async function loadFiles() {
       li.textContent = (f.isDirectory ? '📁 ' : '') + f.name;
       li.title = f.path;
       if (f.isDirectory) {
-        li.style.cursor = 'pointer';
         li.addEventListener('click', () => {
-          // Navigate into the directory
           fsPath.value = f.path;
           loadFiles();
         });
       } else {
-        li.addEventListener('click', () => openFile(f));
+        li.addEventListener('click', () => openFile(f, li));
       }
       fsList.appendChild(li);
     });
@@ -283,7 +305,7 @@ async function loadFiles() {
   }
 }
 
-async function openFile(f) {
+async function openFile(f, li) {
   const rel = f.path || f.name;
   try {
     const r = await fetch(`/api/file?path=${encodeURIComponent(rel)}`);
@@ -296,9 +318,9 @@ async function openFile(f) {
     fsName.textContent = rel;
     fsContent.textContent = text;
     fsContent.contentEditable = 'true';
-    $('#fs-edit').hidden = false;
     $('#fs-save').hidden = false;
-    fsList.querySelectorAll('li').forEach(li => li.classList.toggle('sel', li.title === rel));
+    fsList.querySelectorAll('li').forEach(x => x.classList.remove('sel'));
+    if (li) li.classList.add('sel');
   } catch (e) {
     fsContent.textContent = e.message;
     fsContent.style.color = 'var(--error)';
@@ -311,7 +333,7 @@ $('#fs-close').addEventListener('click', () => {
   fsContent.textContent = '';
   fsContent.style.color = '';
   fsContent.contentEditable = 'false';
-  $('#fs-edit').hidden = $('#fs-save').hidden = true;
+  $('#fs-save').hidden = true;
   curFile = '';
 });
 
@@ -332,12 +354,7 @@ $('#fs-save').addEventListener('click', async () => {
   } catch (e) { alert(e.message); }
 });
 
-$('#fs-edit').addEventListener('click', () => {
-  fsContent.contentEditable = 'true';
-  fsContent.focus();
-});
-
-// ── Skills ─────────────────────────────────────────────────────────
+// ── Skills modal ──────────────────────────────────────────────────
 const skList  = $('#sk-list');
 const skTitle = $('#sk-title');
 const skBody  = $('#sk-body');
@@ -365,8 +382,9 @@ async function loadSkills() {
           const rr = await fetch(`/api/skill/${encodeURIComponent(s.name)}`);
           if (!rr.ok) throw new Error(`HTTP ${rr.status}`);
           const data = await rr.json().catch(() => rr.text());
-          // The endpoint returns { name, content } as JSON
-          skBody.textContent = typeof data === 'string' ? data : (data.content || JSON.stringify(data, null, 2));
+          skBody.textContent = typeof data === 'string'
+            ? data
+            : (data.content || JSON.stringify(data, null, 2));
         } catch (e) {
           skBody.textContent = 'Ошибка: ' + e.message;
         }
@@ -378,24 +396,9 @@ async function loadSkills() {
   }
 }
 
-$('#sk-new').addEventListener('click', async () => {
-  const name = prompt('Название навыка (латиница, дефисы):');
-  if (!name) return;
-  const src = prompt('Содержимое SKILL.md (YAML-заголовок + текст):',
-    `---\nname: ${name}\ndescription: Новый навык\n---\n\n# ${name}\n`);
-  if (!src) return;
-  try {
-    await fetch('/api/skill/save', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, content: src }),
-    });
-    loadSkills();
-  } catch (e) { alert(e.message); }
-});
-
-// ── Logs ───────────────────────────────────────────────────────────
+// ── Logs modal ────────────────────────────────────────────────────
 const logOut = $('#log-out');
+let logPollId = null;
 
 async function refreshLogs() {
   try {
@@ -407,10 +410,29 @@ async function refreshLogs() {
     logOut.textContent = `Ошибка: ${e.message}`;
   }
 }
+
 $('#log-refresh').addEventListener('click', refreshLogs);
+$('#log-clear').addEventListener('click', () => {
+  logOut.textContent = '';
+  logOut.scrollTop = 0;
+});
+
+// Poll logs while modal is open
+const logModal = $('#modal-logs');
+const logObserver = new MutationObserver(() => {
+  if (!logModal.hidden) {
+    if (!logPollId) {
+      logPollId = setInterval(refreshLogs, 4000);
+    }
+  } else {
+    if (logPollId) {
+      clearInterval(logPollId);
+      logPollId = null;
+    }
+  }
+});
+logObserver.observe(logModal, { attributes: true, attributeFilter: ['hidden'] });
 
 // ── Init ───────────────────────────────────────────────────────────
 checkEngine();
 setInterval(checkEngine, 15_000);
-// Preload skills and files on load
-loadSkills();

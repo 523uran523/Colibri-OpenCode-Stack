@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark light">
   <title>Agent Lite</title>
   <link rel="stylesheet" href="/style.css">
   <script src="/app.js" defer></script>
@@ -14,141 +15,152 @@
   <header class="hdr">
     <span class="hdr__brand">Agent <b>Lite</b></span>
 
-    <!-- LLM status -->
-    <div class="hdr__status" id="engine-pod">
-      <span class="dot" id="engine-dot"></span>
-      <span id="engine-label">Не запущен</span>
-      <button id="btn-start" title="Запустить Qwen3-Coder (Colibri :8000 + прокси :8001)">▶</button>
-      <button id="btn-stop" disabled title="Остановить">⏹</button>
+    <div class="hdr__icons">
+      <button class="hdr__icon" id="btn-settings" title="Настройки">⚙️</button>
+      <button class="hdr__icon" id="btn-files"    title="Файлы">📁</button>
+      <button class="hdr__icon" id="btn-skills"    title="Навыки">🧩</button>
+      <button class="hdr__icon" id="btn-logs"      title="Логи">📜</button>
     </div>
 
-    <!-- Theme toggle -->
-    <button class="hdr__icon" id="theme-btn" title="Сменить тему">◐</button>
+    <div class="hdr__right">
+      <div class="hdr__status">
+        <span class="dot" id="engine-dot"></span>
+        <span id="engine-label">Не запущен</span>
+      </div>
+      <button id="btn-start" class="hdr__action" title="Запустить Qwen">▶</button>
+      <button id="btn-stop"  class="hdr__action" disabled title="Остановить">⏹</button>
+      <button class="hdr__icon" id="theme-btn" title="Сменить тему">◐</button>
+    </div>
   </header>
 
-  <!-- ─── NAV ─────────────────────────────────────────────────── -->
-  <nav class="nav">
-    <button data-view="chat"    class="nav__btn active">Диалог</button>
-    <button data-view="files"   class="nav__btn">Файлы</button>
-    <button data-view="skills"  class="nav__btn">Навыки</button>
-    <button data-view="settings" class="nav__btn">Настройки</button>
-    <button data-view="logs"    class="nav__btn">Логи</button>
-  </nav>
-
-  <!-- ─── MAIN ────────────────────────────────────────────────── -->
-  <main class="main">
-
-    <!-- ЧАТ -->
-    <section id="view-chat" class="view">
-      <div id="msgs" class="msgs">
-        <div class="msgs__welcome">
-          <div class="msgs__spark">✦</div>
-          <h2>Спросите что-нибудь</h2>
-          <p>Модель отвечает локально через Colibri-прокси.<br>Используйте навык edit-by-anchor для правок файлов.</p>
-        </div>
+  <!-- ─── MAIN CHAT ──────────────────────────────────────────── -->
+  <main class="chat-area">
+    <div id="msgs" class="msgs">
+      <div class="msgs__welcome">
+        <div class="msgs__spark">✦</div>
+        <h2>Спросите что-нибудь</h2>
+        <p>Модель Qwen3-Coder отвечает локально через Colibri-прокси.<br>
+           Используйте навык <code>edit-by-anchor</code> для правок файлов.</p>
       </div>
+    </div>
 
-      <div id="thinking" class="thinking" hidden>
-        <span class="spinner"></span>
-        <span id="thinking-text">Модель думает…</span>
-      </div>
+    <div id="thinking" class="thinking" hidden>
+      <span class="spinner"></span>
+      <span id="thinking-text">Модель думает…</span>
+    </div>
 
-      <form id="chat-form" class="composer">
-        <textarea id="prompt" rows="3" placeholder="Опишите задачу…" aria-label="Сообщение"></textarea>
-        <div class="composer__bar">
-          <button type="button" id="attach-btn" title="Прикрепить файл">📎</button>
-          <input id="attach-input" type="file" multiple hidden
-                 accept=".txt,.md,.json,.csv,.yaml,.yml,.py,.js,.html,.css,.log,.png,.jpg,.jpeg,.webp">
-          <button type="button" id="stop-btn" class="btn btn--ghost" hidden>Остановить</button>
-          <button type="submit" id="send-btn" class="btn btn--primary">Отправить</button>
-        </div>
-      </form>
-    </section>
+    <form id="chat-form" class="composer">
+      <textarea id="prompt" rows="3" placeholder="Опишите задачу…" aria-label="Сообщение"></textarea>
+      <div class="composer__bar">
+        <button type="button" id="attach-btn" title="Прикрепить файл">📎</button>
+        <input id="attach-input" type="file" multiple hidden
+               accept=".txt,.md,.json,.csv,.yaml,.yml,.py,.js,.html,.css,.log,.png,.jpg,.jpeg,.webp">
+        <span class="composer__spacer"></span>
+        <button type="button" id="stop-btn" class="btn btn--ghost" hidden>Остановить</button>
+        <button type="submit" id="send-btn" class="btn btn--primary">Отправить</button>
+      </div>
+    </form>
+  </main>
 
-    <!-- ФАЙЛЫ -->
-    <section id="view-files" class="view" hidden>
-      <div class="sec-hdr">
-        <h2>Файлы проекта</h2>
-        <span id="fs-ws-label" class="fs-ws-label"></span>
-        <label class="lbl">
-          Путь <input id="fs-path" type="text" placeholder="папка внутри проекта" required>
-          <button id="fs-go" class="btn btn--primary">Открыть</button>
-        </label>
+  <!-- ─── MODAL: SETTINGS ─────────────────────────────────────── -->
+  <div class="modal-overlay" id="modal-settings" hidden>
+    <div class="modal">
+      <div class="modal__hdr">
+        <h3>⚙️ Настройки</h3>
+        <button class="modal__close" data-close="settings">✕</button>
       </div>
-      <div class="files-grid">
-        <div id="fs-list" class="files-list"></div>
-        <div class="files-preview">
-          <h3 id="fs-name">Выберите файл</h3>
-          <div class="files-actions">
-            <button id="fs-edit"  class="btn btn--ghost" hidden>Редактировать</button>
-            <button id="fs-save"  class="btn btn--primary" hidden>Сохранить</button>
-            <button id="fs-close" class="btn btn--ghost">Закрыть</button>
-          </div>
-          <pre id="fs-content" class="code-block"></pre>
-        </div>
-      </div>
-    </section>
-
-    <!-- НАВЫКИ -->
-    <section id="view-skills" class="view" hidden>
-      <div class="sec-hdr">
-        <h2>Навыки</h2>
-        <button id="sk-new" class="btn btn--primary">+ Новый</button>
-      </div>
-      <div class="sk-grid">
-        <ul id="sk-list" class="sk-list"></ul>
-        <div class="sk-view">
-          <h3 id="sk-title">Выберите навык</h3>
-          <pre id="sk-body" class="code-block">Кликните на навык слева.</pre>
-        </div>
-      </div>
-    </section>
-
-    <!-- НАСТРОЙКИ -->
-    <section id="view-settings" class="view" hidden>
-      <div class="sec-hdr"><h2>Подключение LLM</h2></div>
-      <div class="set-card">
-        <label>Адрес прокси (colibri_proxy)
+      <div class="modal__body">
+        <label class="fld">Адрес прокси
           <input id="cfg-base" type="text" value="http://127.0.0.1:8001/v1">
         </label>
-        <label>Модель
+        <label class="fld">Модель
           <input id="cfg-model" type="text" value="qwen3-coder-30b-a3b-colibri">
         </label>
-        <label>Макс. токены
+        <label class="fld">Макс. токены
           <input id="cfg-tokens" type="number" value="4096" min="128" max="16384" step="128">
         </label>
-        <label>Рабочая папка
-          <input id="cfg-workspace" type="text" value="C:\Users\523ur\OneDrive\Документы\MeWeb">
+        <label class="fld">Рабочая папка
+          <input id="cfg-workspace" type="text" value="">
         </label>
-        <div class="set-actions">
+        <div class="modal__actions">
           <button id="cfg-probe" class="btn btn--ghost">Проверить</button>
-          <button id="cfg-save" class="btn btn--primary">Сохранить</button>
+          <button id="cfg-save"  class="btn btn--primary">Сохранить</button>
           <span id="cfg-result" class="set-result"></span>
         </div>
       </div>
-    </section>
+    </div>
+  </div>
 
-    <!-- ЛОГИ -->
-    <section id="view-logs" class="view" hidden>
-      <div class="sec-hdr">
-        <h2>Логи</h2>
-        <button id="log-refresh" class="btn btn--ghost">Обновить</button>
+  <!-- ─── MODAL: FILES ────────────────────────────────────────── -->
+  <div class="modal-overlay" id="modal-files" hidden>
+    <div class="modal modal--wide">
+      <div class="modal__hdr">
+        <h3>📁 Файлы проекта</h3>
+        <button class="modal__close" data-close="files">✕</button>
       </div>
-      <!-- Engine control panel -->
-      <div class="engine-panel">
-        <div class="engine-panel__row">
-          <span class="dot" id="eng-panel-dot"></span>
-          <span id="eng-panel-label">Статус движка…</span>
+      <div class="modal__body">
+        <div class="files-bar">
+          <span id="fs-ws-label" class="fs-ws-label"></span>
+          <input id="fs-path" type="text" placeholder="папка внутри проекта">
+          <button id="fs-go" class="btn btn--primary">Открыть</button>
         </div>
-        <div class="engine-panel__btns">
-          <button id="eng-start-btn" class="btn btn--primary">▶ Запустить Qwen</button>
-          <button id="eng-stop-btn" class="btn btn--ghost" disabled>⏹ Остановить</button>
+        <div class="files-grid">
+          <div id="fs-list" class="files-list"></div>
+          <div class="files-preview">
+            <h3 id="fs-name">Выберите файл</h3>
+            <div class="files-actions">
+              <button id="fs-save"  class="btn btn--primary" hidden>Сохранить</button>
+              <button id="fs-close" class="btn btn--ghost">Закрыть</button>
+            </div>
+            <pre id="fs-content" class="code-block" contenteditable="false"></pre>
+          </div>
         </div>
       </div>
-      <pre id="log-out" class="code-block log-block">Загрузка…</pre>
-    </section>
+    </div>
+  </div>
 
-  </main>
+  <!-- ─── MODAL: SKILLS ──────────────────────────────────────── -->
+  <div class="modal-overlay" id="modal-skills" hidden>
+    <div class="modal">
+      <div class="modal__hdr">
+        <h3>🧩 Навыки</h3>
+        <button class="modal__close" data-close="skills">✕</button>
+      </div>
+      <div class="modal__body">
+        <div class="sk-grid">
+          <ul id="sk-list" class="sk-list"></ul>
+          <div class="sk-view">
+            <h3 id="sk-title">Выберите навык</h3>
+            <pre id="sk-body" class="code-block">Кликните на навык слева.</pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── MODAL: LOGS ─────────────────────────────────────────── -->
+  <div class="modal-overlay" id="modal-logs" hidden>
+    <div class="modal modal--wide">
+      <div class="modal__hdr">
+        <h3>📜 Логи</h3>
+        <div class="modal__hdr-right">
+          <button id="log-clear" class="btn btn--ghost">Очистить</button>
+          <button id="log-refresh" class="btn btn--ghost">Обновить</button>
+          <button class="modal__close" data-close="logs">✕</button>
+        </div>
+      </div>
+      <div class="modal__body">
+        <div class="engine-panel">
+          <div class="engine-panel__row">
+            <span class="dot" id="eng-panel-dot"></span>
+            <span id="eng-panel-label">Статус движка…</span>
+          </div>
+        </div>
+        <pre id="log-out" class="code-block log-block">Загрузка…</pre>
+      </div>
+    </div>
+  </div>
+
 </div>
 </body>
 </html>
