@@ -129,6 +129,17 @@
         <h2>Логи</h2>
         <button id="log-refresh" class="btn btn--ghost">Обновить</button>
       </div>
+      <!-- Engine control panel -->
+      <div class="engine-panel">
+        <div class="engine-panel__row">
+          <span class="dot" id="eng-panel-dot"></span>
+          <span id="eng-panel-label">Статус движка…</span>
+        </div>
+        <div class="engine-panel__btns">
+          <button id="eng-start-btn" class="btn btn--primary">▶ Запустить Qwen</button>
+          <button id="eng-stop-btn" class="btn btn--ghost" disabled>⏹ Остановить</button>
+        </div>
+      </div>
       <pre id="log-out" class="code-block log-block">Загрузка…</pre>
     </section>
 

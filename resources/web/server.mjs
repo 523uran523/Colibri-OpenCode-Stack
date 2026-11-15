@@ -90,7 +90,7 @@ async function startEngine(){
   const logsDir=path.join(DATA,'logs');await fs.mkdir(logsDir,{recursive:true});
   const logFile=path.join(logsDir,'engine.log');
   try{
-    const args=['serve','--model',path.join('G:\\','models','qwen3-coder-30b'),'--model-id','qwen3-coder-30b-a3b-colibri','--cap','32','--ctx','16384','--host','127.0.0.1','--port',String(ENGINE_PORT)];
+    const args=['serve','--model',path.join('G:\\','models','qwen3-coder-30b'),'--model-id','qwen3-coder-30b-a3b-colibri','--cap','40','--ctx','16384','--host','127.0.0.1','--port',String(ENGINE_PORT)];
     engineProcess=spawn('py',['-3',path.join(COLIBRI_RUNTIME,'coli'),...args],{env:{...process.env,COLI_CUDA:'1',CUDA_DENSE:'1',CUDA_EXPERT_GB:'3',HEAT_FILE:'G:\\colibri_cache\\qwen.heat',COLI_CACHE_DIR:'G:\\colibri_cache',COLI_TOOL_FALLBACK:'1',COLI_CTX:'16384'},cwd:CALIBRI_ROOT,stdio:['ignore','pipe','pipe']});
     engineProcess.stdout.on('data',d=>{engineLogBuffer.push(d.toString());if(engineLogBuffer.length>500)engineLogBuffer=engineLogBuffer.slice(-500);console.log('[engine]',d.toString().trim());});
     engineProcess.stderr.on('data',d=>{engineLogBuffer.push('[err] '+d.toString());if(engineLogBuffer.length>500)engineLogBuffer=engineLogBuffer.slice(-500);});

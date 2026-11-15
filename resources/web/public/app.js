@@ -34,6 +34,10 @@ const engineDot   = $('#engine-dot');
 const engineLabel = $('#engine-label');
 const btnStart    = $('#btn-start');
 const btnStop     = $('#btn-stop');
+const engPanelDot   = $('#eng-panel-dot');
+const engPanelLabel = $('#eng-panel-label');
+const engStartBtn   = $('#eng-start-btn');
+const engStopBtn    = $('#eng-stop-btn');
 
 function setEngineState(state, label) {
   engineDot.className = 'dot';
@@ -43,7 +47,19 @@ function setEngineState(state, label) {
   engineLabel.textContent = label;
   btnStart.disabled = state === 'on' || state === 'run';
   btnStop.disabled  = !(state === 'on');
+  // Also update Logs panel
+  engPanelDot.className = 'dot';
+  if (state === 'on')  engPanelDot.classList.add('dot--on');
+  if (state === 'run') engPanelDot.classList.add('dot--run');
+  if (state === 'err') engPanelDot.classList.add('dot--err');
+  engPanelLabel.textContent = state === 'on' ? label : label;
+  engStartBtn.disabled = state === 'on' || state === 'run';
+  engStopBtn.disabled  = !(state === 'on');
 }
+
+// Wire up Logs panel buttons
+engStartBtn.addEventListener('click', () => btnStart.click());
+engStopBtn.addEventListener('click', () => btnStop.click());
 
 async function checkEngine() {
   try {
