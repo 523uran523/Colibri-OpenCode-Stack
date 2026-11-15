@@ -49,7 +49,7 @@ const providers = [
 ];
 for(const preset of providers)if(!preset.group)preset.group='advanced';
 await Promise.all([DATA, SKILLS, DEFAULT_MODELS, DEFAULT_WORKSPACE].map(p=>fs.mkdir(p,{recursive:true})));
-const defaults = {provider:'local',baseUrl:'',model:'local',connectionId:'',modelsDir:'resources/LLM',workspace:'workspace',localModelPath:'',juliaPath:'',claudePath:'',powershellPath:'',gitBashPath:'',engeeAccountUrl:'https://engee.com',engeeRuntimeUrl:'',apiKeys:{},engeeToken:'',engeeUsername:'',engeePassword:'',engeeEnabled:false};
+const defaults = {provider:'colibri',baseUrl:'http://127.0.0.1:8001/v1',model:'qwen3-coder-30b-a3b-colibri',connectionId:'',modelsDir:'resources/LLM',workspace:'workspace',localModelPath:'',juliaPath:'',claudePath:'',powershellPath:'',gitBashPath:'',engeeAccountUrl:'https://engee.com',engeeRuntimeUrl:'',apiKeys:{},engeeToken:'',engeeUsername:'',engeePassword:'',engeeEnabled:false,maxTokens:4096};
 let config = {...defaults};
 const notices=[];
 try {config = {...defaults, ...JSON.parse(await fs.readFile(CONFIG,'utf8'))};} catch(e) {if(e.code !== 'ENOENT'){await fs.rename(CONFIG,CONFIG+'.invalid-'+Date.now());notices.push('Конфигурация повреждена. Сохранена резервная копия; настройте подключения в интерфейсе.');}}
@@ -662,7 +662,91 @@ const server=http.createServer(async(req,res)=>{
     if(![`127.0.0.1:${PORT}`,`localhost:${PORT}`].includes(host))throw fail('Недопустимый Host.',403);
     if(req.headers.origin&&!['http://'+host].includes(req.headers.origin))throw fail('Запросы разрешены только со страницы этого приложения.',403);
     const url=new URL(req.url,'http://'+host), route=url.pathname;
-    if(req.method==='GET' && route==='/api/health')return send(res,200,{app:'engee-portable-agent',version:'1.2.0',installationId,port:PORT,activeRequests:requests.size});
+    if(req.method==='GET' && route==='/api/health')return send(res,200,{app:'agent-lite',version:'1.0.0',port:PORT});
+
+    // ─── Agent Lite minimal endpoints ─────────────────────────────────────
+    // GET /api/probe — quick LLM health check via the active provider
+    if(req.method==='GET' && route==='/api/probe'){
+      try {
+        const base = (config.baseUrl || 'http://127.0.0.1:8001/v1').replace(/\/v1$/,'');
+        const resp = await fetch(base + '/v1/models', { signal: AbortSignal.timeout(5000) });
+        if (!resp.ok) return send(res, 200, { error: `HTTP ${resp.status}` });
+        const d = await resp.json();
+        return send(res, 200, { ok: true, model: config.model || 'default', models: (d.data || []).map(m=>m.id).slice(0,10) });
+      } catch (e) {
+        return send(res, 200, { error: e.message });
+      }
+    }
+    // GET /api/config — current config (public fields only)
+    if(req.method==='GET' && route==='/api/config')
+      return send(res, 200, { baseUrl: config.baseUrl, model: config.model, maxTokens: config.maxTokens || 4096, provider: config.provider });
+    // GET /api/skills — list skill names
+    if(req.method==='GET' && route==='/api/skills'){
+      const list = await skillList();
+      return send(res, 200, { skills: list });
+    }
+    // GET /api/skill/:name — read one skill
+    if(req.method==='GET' && route.startsWith('/api/skill/')){
+      const name = decodeURIComponent(route.slice('/api/skill/'.length));
+      try {
+        const content = await fs.readFile(path.join(SKILLS, name, 'SKILL.md'), 'utf8');
+        return send(res, 200, { name, content });
+      } catch {
+        return send(res, 404, { error: 'Skill not found' });
+      }
+    }
+    // GET /api/logs — last 300 lines of engine log buffer
+    if(req.method==='GET' && route==='/api/logs')
+      return send(res, 200, { tail: engineLogBuffer.slice(-300).join('\n'), state: engineState });
+    // POST /api/chat — simple one-shot chat (no tools, no multi-turn state)
+    if(req.method==='POST' && route==='/api/chat'){
+      let body;
+      try { body = await readBody(req); } catch { body = {}; }
+      const messages = Array.isArray(body.messages) ? body.messages : [];
+      try {
+        const base = (config.baseUrl || 'http://127.0.0.1:8001/v1').replace(/\/v1$/,'');
+        const model  = body.model || config.model || 'qwen3-coder-30b-a3b-colibri';
+        const maxTok = body.max_tokens || config.maxTokens || 4096;
+        const resp = await fetch(base + '/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model, messages, max_tokens: maxTok, stream: false }),
+          signal: AbortSignal.timeout(120_000),
+        });
+        if (!resp.ok) {
+          const errText = await resp.text().catch(()=> '');
+          return send(res, 502, { error: `Upstream ${resp.status}: ${errText.slice(0,200)}` });
+        }
+        const data = await resp.json();
+        return send(res, 200, data);
+      } catch (e) {
+        return send(res, 502, { error: e.message });
+      }
+    }
+    // POST /api/file/save — write file to workspace
+    if(req.method==='POST' && route==='/api/file/save'){
+      let body;
+      try { body = await readBody(req); } catch { body = {}; }
+      const target = workspacePath(String(body.path||'').trim());
+      if (body.content === undefined) throw fail('Пустой контент.');
+      await fs.mkdir(path.dirname(target), { recursive: true });
+      await fs.writeFile(target, String(body.content), 'utf8');
+      return send(res, 200, { saved: true, path: body.path });
+    }
+    // POST /api/skill/save — create new skill
+    if(req.method==='POST' && route==='/api/skill/save'){
+      let body;
+      try { body = await readBody(req); } catch { body = {}; }
+      const name = String(body.name||'').trim().toLowerCase().replace(/[^a-z0-9-]/g,'');
+      if (!name || name.length > 60) throw fail('Некорректное имя навыка.');
+      const content = String(body.content||'');
+      const dir = path.join(SKILLS, name);
+      await fs.mkdir(dir, { recursive: true });
+      await fs.writeFile(path.join(dir, 'SKILL.md'), content, 'utf8');
+      return send(res, 200, { saved: true, name });
+    }
+
+    // ─── Existing (legacy) routes ─────────────────────────────────────────
     if(req.method==='GET' && route==='/api/openrouter/auth/status')return send(res,200,openRouterAuth.status(url.searchParams.get('id')));
     if(req.method==='GET' && route==='/auth/openrouter/callback'){
       let page,status=200;try{if(url.searchParams.getAll('state').length!==1||url.searchParams.getAll('code').length>1||url.searchParams.getAll('error').length>1)throw fail('Не удалось подтвердить запрос входа OpenRouter. Начните подключение из Engee Agent.');page=openRouterAuth.callback({state:url.searchParams.get('state'),code:url.searchParams.get('code'),error:url.searchParams.get('error')});}catch(error){status=error.status||400;page=callbackPage(error.status?error.message:'Не удалось завершить вход OpenRouter. Повторите подключение.');}res.writeHead(status,page.headers);return res.end(page.html);
