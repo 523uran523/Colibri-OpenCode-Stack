@@ -86,3 +86,21 @@
 [data-theme="dark"] .connection-wizard{background:#161b22;border-color:#21262d}
 [data-theme="dark"] .connection-types button{background:#0d1117;border-color:#21262d;color:#c9d1d9}
 [data-theme="dark"] .connection-types button[aria-pressed=true]{background:#1c2a45;border-color:#58a6ff}
+
+/* ===== Engine Logs View ===== */
+.logs-view{padding-top:0}
+.logs-card{padding:18px 22px}
+.engine-header{display:flex;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap}
+.engine-dot{display:inline-block;width:12px;height:12px;border-radius:50%;background:#8b949e;transition:background .3s}
+.engine-dot.is-running{background:#3fb950}
+.engine-dot.is-starting{background:#d29922;animation:pulse 1s infinite}
+.engine-dot.is-error{background:#f85149}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.engine-label{font-size:13px;font-weight:600;color:var(--ink)}
+.engine-buttons{margin-left:auto;display:flex;gap:8px;align-items:center}
+.engine-spinner{display:flex;align-items:center;gap:10px;padding:10px 0;color:var(--muted);font-size:13px}
+.engine-spinner .spinner{width:16px;height:16px;border:2px solid var(--line);border-top-color:var(--blue);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.engine-log{max-height:420px;overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:12px;font:11px/1.6 var(--mono);color:var(--muted);white-space:pre-wrap;word-break:break-all}
+.engine-log pre{margin:0}
+@media(max-width:760px){.engine-header{flex-direction:column;align-items:flex-start}.engine-buttons{margin-left:0;width:100%;justify-content:flex-end}}
