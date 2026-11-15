@@ -20,24 +20,22 @@ if not exist "data" (
   mkdir "data"
 )
 
-rem ── Start engine (Colibri + Proxy) if not running ─────────────────────────
-netstat -an | findstr ":8000" | findstr "LISTENING" >nul 2>&1
-if errorlevel 1 (
-    echo [Agent Lite] Starting Colibri engine on :8000 ...
-    start "" /b python "scripts\Start_Qwen_Server.bat"
-    echo [Agent Lite] Waiting for engine...
-    timeout /t 120 /nobreak >nul
-)
-netstat -an | findstr ":8001" | findstr "LISTENING" >nul 2>&1
-if errorlevel 1 (
-    echo [Agent Lite] Starting proxy on :8001 ...
-    start "" /b python "tools\colibri_proxy.py" --listen 8001 --upstream 127.0.0.1:8000 --log "logs\proxy.jsonl"
-    timeout /t 5 /nobreak >nul
+if not exist "data\logs" (
+  mkdir "data\logs"
 )
 
-rem ── Start web UI ──────────────────────────────────────────────────────────
+rem ── Auto-start Colibri engine + proxy ─────────────────────────────────────
+rem The node server owns the Colibri lifecycle: POST /api/engine/start spawns
+rem the engine (port 8000), waits for /health and then spawns colibri_proxy
+rem (port 8001) — with live UI status, log buffer and a Stop button. A hidden
+rem PowerShell watcher waits for the web server to come up, then triggers it.
+rem No extra console windows, no double instances.
+start "" /b powershell.exe -NoProfile -WindowStyle Hidden -Command "$ok=$false; for ($i=0; $i -lt 90; $i++) { Start-Sleep -Seconds 2; try { $r = Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:3081/api/health' -TimeoutSec 3; if ($r.StatusCode -eq 200) { $ok=$true; break } } catch {} }; if ($ok) { try { Invoke-WebRequest -UseBasicParsing -Method POST -Uri 'http://127.0.0.1:3081/api/engine/start' -ContentType 'application/json' -Body '{}' -TimeoutSec 15 | Out-Null } catch {} }"
+
+rem ── Start web UI ───────────────────────────────────────────────────────────
 echo.
 echo [Agent Lite] Starting web UI on http://127.0.0.1:3081
+echo [Agent Lite] Colibri starts automatically in the background (~1-3 minutes).
 echo.
 
 rem Open browser after server starts
@@ -46,7 +44,7 @@ start "" cmd /c "timeout /t 2 >nul && start http://127.0.0.1:3081"
 "resources\runtime\node.exe" "resources\web\server.mjs"
 
 if errorlevel 1 (
-    echo.
-    echo [Agent Lite] Server stopped with error.
-    pause
+  echo.
+  echo [Agent Lite] Server stopped with error.
+  pause
 )

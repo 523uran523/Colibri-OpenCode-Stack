@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Agent Lite v4 — menu, chat sessions, input history
  */
 
@@ -237,6 +237,20 @@ function newChat() {
   promptEl.focus();
 }
 
+// Wipe the current session entirely (used when it got polluted with raw XML)
+function clearHistory() {
+  if (!window.confirm('Очистить текущую историю? Сессия будет удалена целиком, включая ответы с XML-разметкой.')) return;
+  sessions = sessions.filter(s => s.id !== currentId);
+  saveSessions();
+  createSession(); // fresh empty session, history = []
+  clearMessages();
+  setContext(0, 16384);
+  renderHistoryList();
+  closeModal('history');
+  closeMenu();
+  promptEl.focus();
+}
+
 function deleteSession(id, ev) {
   if (ev) ev.stopPropagation();
   const wasCurrent = id === currentId;
@@ -254,6 +268,7 @@ function deleteSession(id, ev) {
 
 $('#btn-history').addEventListener('click', () => { renderHistoryList(); openModal('history'); });
 $('#btn-newchat').addEventListener('click', newChat);
+$('#btn-clear-history').addEventListener('click', clearHistory);
 $('#hist-new').addEventListener('click', newChat);
 
 // ── Context ring ───────────────────────────────────────────────────
@@ -364,10 +379,28 @@ const form       = $('#chat-form');
 const promptEl   = $('#prompt');
 const thinking   = $('#thinking');
 const thinkingTx = $('#thinking-text');
+const thinkingTimer = $('#thinking-timer');
 const sendBtn    = $('#send-btn');
 const stopBtn    = $('#stop-btn');
 
 let chatAbort = null;
+let lastDiff = null;
+let timerInterval = null;
+
+// ── Chat/Agent mode toggle ────────────────────────────────────────
+const modeChat  = $('#mode-chat');
+const modeAgent = $('#mode-agent');
+let chatMode = localStorage.getItem('agent-mode') || 'agent';
+const applyMode = (m, save = true) => {
+  chatMode = m === 'chat' ? 'chat' : 'agent';
+  modeChat.classList.toggle('active', chatMode === 'chat');
+  modeAgent.classList.toggle('active', chatMode === 'agent');
+  $('#mode-toggle').dataset.mode = chatMode;
+  if (save) localStorage.setItem('agent-mode', chatMode);
+};
+modeChat.addEventListener('click', () => applyMode('chat'));
+modeAgent.addEventListener('click', () => applyMode('agent'));
+applyMode(chatMode, false);
 
 form.addEventListener('submit', async e => {
   e.preventDefault();
@@ -381,44 +414,138 @@ form.addEventListener('submit', async e => {
 
   thinking.hidden = false;
   thinkingTx.textContent = 'Модель думает…';
+  thinkingTimer.textContent = '00:00';
   sendBtn.disabled = true;
   stopBtn.hidden = false;
 
+  let timerSeconds = 0;
+  clearInterval(timerInterval);
+  timerInterval = setInterval(() => {
+    timerSeconds++;
+    const m = Math.floor(timerSeconds / 60).toString().padStart(2, '0');
+    const s = (timerSeconds % 60).toString().padStart(2, '0');
+    thinkingTimer.textContent = `${m}:${s}`;
+  }, 1000);
+
   const bubble = addMsg('assistant', '…');
   chatAbort = new AbortController();
-  stopBtn.onclick = () => { try { chatAbort.abort(); } catch {} };
+  stopBtn.onclick = () => { try { chatAbort.abort(); } catch {} clearInterval(timerInterval); };
 
   try {
     const resp = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages: history }),
+      body: JSON.stringify({ messages: history, mode: chatMode }),
       signal: chatAbort.signal,
     });
-    if (!resp.ok) {
+    if (!resp.ok || !resp.body) {
       const err = await resp.json().catch(() => ({}));
       throw new Error(err.error || `HTTP ${resp.status}`);
     }
-    const data = await resp.json();
-    const reply = data.choices?.[0]?.message?.content ?? JSON.stringify(data);
-    bubble.textContent = reply;
-    history.push({ role: 'assistant', content: reply });
 
-    if (data.tool_events?.length) {
-      const toolDiv = document.createElement('div');
-      toolDiv.className = 'msg msg--tools';
-      toolDiv.innerHTML = '<div class="msg__role">Инструменты</div>' +
-        data.tool_events.map(ev =>
-          `<div class="tool-event">${ev.tool === 'bash' ? '⚡' : ev.tool === 'read_skill' ? '🧩' : '⚙️'} <b>${ev.tool}</b>(${JSON.stringify(ev.args).slice(0, 120)})</div>`
-        ).join('');
-      msgs.appendChild(toolDiv);
-      msgs.scrollTop = msgs.scrollHeight;
+    // ── Read SSE stream: tool_call / tool_result / file_change / done / error ──
+    const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const toolIcon = t => t === 'bash' ? '⚡' : t === 'read_skill' ? '🧩' : t === 'read' ? '📖' : t === 'write' ? '📝' : t === 'edit' ? '✏️' : t === 'grep' ? '🔍' : t === 'list' ? '📁' : '⚙️';
+    let toolLogDiv = null;
+    const runningCards = [];
+    // Accordion: reasoning + tool cards live collapsed inside <details>.
+    // Created only when the model actually reasons/calls tools, so chat mode
+    // (pure conversation, no events) never shows it.
+    const ensureToolLog = () => {
+      if (!toolLogDiv && chatMode === 'agent') {
+        const details = document.createElement('details');
+        details.className = 'reasoning-dropdown msg';
+        details.innerHTML = '<summary class="reasoning-dropdown__summary">🤔 Показать размышления и инструменты</summary><div class="reasoning-dropdown__body"></div>';
+        msgs.appendChild(details);
+        toolLogDiv = details;
+      }
+      return toolLogDiv;
+    };
+    const toolBody = () => toolLogDiv.querySelector('.reasoning-dropdown__body');
+    let finalReply = null;
+    let usage = null;
+
+    const handleEvent = ev => {
+      if (ev.type === 'reasoning') {
+        const log = ensureToolLog();
+        if (!log) return;
+        const p = document.createElement('div');
+        p.className = 'reasoning-text';
+        p.textContent = String(ev.text || '').slice(0, 4000);
+        toolBody().appendChild(p);
+        msgs.scrollTop = msgs.scrollHeight;
+      } else if (ev.type === 'tool_call') {
+        const log = ensureToolLog();
+        if (!log) return;
+        const card = document.createElement('div');
+        card.className = 'tool-event tool-event--running';
+        card.innerHTML = `${toolIcon(ev.tool)} <b>Запуск: ${esc(ev.tool)}</b><div class="tool-args">${esc(JSON.stringify(ev.args ?? {})).slice(0, 400)}</div>`;
+        toolBody().appendChild(card);
+        runningCards.push(card);
+        msgs.scrollTop = msgs.scrollHeight;
+      } else if (ev.type === 'tool_result') {
+        const card = runningCards.shift();
+        if (card) {
+          card.classList.remove('tool-event--running');
+          card.classList.add('tool-event--done');
+          const res = document.createElement('div');
+          res.className = 'tool-result';
+          res.textContent = String(ev.result || '').slice(0, 300);
+          card.appendChild(res);
+        }
+        msgs.scrollTop = msgs.scrollHeight;
+      } else if (ev.type === 'file_change') {
+        const log = ensureToolLog();
+        if (!log) return;
+        const row = document.createElement('div');
+        row.className = 'tool-event tool-event--file';
+        row.innerHTML = `✅ Файл <b>${esc(ev.path || 'файл')}</b> изменён. <button class="diff-btn">Показать diff</button>`;
+        row.querySelector('.diff-btn').addEventListener('click', async () => {
+          lastDiff = ev;
+          // lazy-load the diff modal logic on first use
+          const { showDiff } = await import('/diff.mjs');
+          showDiff(ev, openModal);
+        });
+        toolBody().appendChild(row);
+        msgs.scrollTop = msgs.scrollHeight;
+      } else if (ev.type === 'done') {
+        finalReply = ev.reply ?? '';
+        usage = ev.usage || null;
+        // Drop the accordion if the round produced no reasoning and no tool cards
+        if (toolLogDiv && !toolLogDiv.querySelector('.tool-event') && !toolLogDiv.querySelector('.reasoning-text')) {
+          toolLogDiv.remove();
+          toolLogDiv = null;
+        }
+      } else if (ev.type === 'error') {
+        throw new Error(ev.message || 'Ошибка сервера');
+      }
+    };
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let sseBuffer = '';
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      sseBuffer += decoder.decode(value, { stream: true });
+      const parts = sseBuffer.split('\n\n');
+      sseBuffer = parts.pop();
+      for (const part of parts) {
+        const line = part.trim();
+        if (!line.startsWith('data:')) continue;
+        let ev = null;
+        try { ev = JSON.parse(line.slice(5).trim()); } catch { continue; }
+        handleEvent(ev);
+      }
     }
+    if (finalReply == null) throw new Error('Пустой ответ от сервера');
+    bubble.textContent = finalReply;
+    history.push({ role: 'assistant', content: finalReply });
 
-    if (data.usage) {
+    if (usage) {
       const s = currentSession();
-      if (s) s.tokens = data.usage.current_tokens || 0;
-      setContext(data.usage.current_tokens || 0, data.usage.max_tokens || 16384);
+      if (s) s.tokens = usage.current_tokens || 0;
+      setContext(usage.current_tokens || 0, usage.max_tokens || 16384);
     }
     persistCurrent();
   } catch (err) {
@@ -431,7 +558,9 @@ form.addEventListener('submit', async e => {
     }
   } finally {
     chatAbort = null;
+    clearInterval(timerInterval);
     thinking.hidden = true;
+    thinkingTimer.textContent = '';
     thinkingTx.textContent = 'Модель думает…';
     sendBtn.disabled = false;
     stopBtn.hidden = true;

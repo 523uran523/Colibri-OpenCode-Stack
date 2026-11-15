@@ -1,16 +1,7 @@
 ---
 name: search-replace
-description: Поиск через grep, замена через edit; массово — bash.
+description: Поиск grep, замена edit; массово — bash.
 ---
-
 # Поиск и замена
-
-Точечно:
-1. `grep` — ровно 1 совпадение.
-2. `read` offset рядом, limit 10–15.
-3. `edit` old_string/new_string.
-
-Массово:
-1. `grep` все вхождения.
-2. Один файл — `edit`; несколько — `bash` sed.
-3. `grep` — старого не осталось.
+Точечно: `grep` 1 совпадение → `read` limit 10–15 → `edit`.
+Массово: `grep` все → один файл `edit`, несколько — `bash` sed → `grep` старого не осталось.

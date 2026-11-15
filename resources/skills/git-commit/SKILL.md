@@ -1,14 +1,8 @@
 ---
 name: git-commit
-description: Коммит: git status → add → diff --cached → commit.
+description: Коммит: status → add → diff --cached → commit.
 ---
-
 # Git commit
-
-1. `bash` git status — проверь изменения.
-2. `bash` git add <нужные файлы>.
-3. `bash` git diff --cached.
-4. `bash` git commit -m "что сделано".
+1. `bash` git status. 2. git add <файлы>. 3. git diff --cached. 4. git commit -m "что сделано".
 5. Ответ: хеш, файлы, +/−.
-
-Не коммить секреты (.env, ключи) и артефакты (node_modules, *.log, dist). Чужие изменения не трогай.
+Секреты (.env, ключи) и артефакты (node_modules, *.log, dist) не коммить. Чужие изменения не трогай.

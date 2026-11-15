@@ -30,7 +30,13 @@
         <span id="engine-label">Не запущен</span>
       </div>
 
+      <div class="mode-toggle" id="mode-toggle" role="group" aria-label="Режим работы">
+        <button class="mode-pill mode-pill--chat" id="mode-chat" title="Чат — ответы без инструментов и файлов">💬 Чат</button>
+        <button class="mode-pill mode-pill--agent active" id="mode-agent" title="Агент — инструменты, файлы, навык edit-by-anchor">🛠 Агент</button>
+      </div>
+
       <button class="hdr__icon" id="btn-history" title="История чатов">🕘</button>
+      <button class="hdr__icon" id="btn-clear-history" title="Очистить историю — сбросить неудачный контекст">🗑</button>
       <button class="hdr__icon" id="btn-newchat" title="Новый чат">＋</button>
 
       <div class="menu-wrap">
@@ -64,6 +70,7 @@
     <div id="thinking" class="thinking" hidden>
       <span class="spinner"></span>
       <span id="thinking-text">Модель думает…</span>
+      <span id="thinking-timer">00:00</span>
     </div>
 
     <form id="chat-form" class="composer">
@@ -199,7 +206,22 @@
     </div>
   </div>
 
-  <!-- ─── MODAL: LOGS ─────────────────────────────────────────── -->
+  <!-- ─── MODAL: DIFF ─────────────────────────────────────────── -->
+  <div class="modal-overlay" id="modal-diff" hidden>
+    <div class="modal modal--wide">
+      <div class="modal__hdr">
+        <h3 id="diff-title">Diff: файл</h3>
+        <button class="modal__close" data-close="diff">✕</button>
+      </div>
+      <div class="modal__body">
+        <div class="diff-label diff-label--old">Было</div>
+        <pre id="diff-old" class="code-block diff-pre"></pre>
+        <div class="diff-label diff-label--new">Стало</div>
+        <pre id="diff-new" class="code-block diff-pre"></pre>
+      </div>
+    </div>
+  </div>
+
   <div class="modal-overlay" id="modal-logs" hidden>
     <div class="modal modal--wide">
       <div class="modal__hdr">

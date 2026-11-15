@@ -1,4 +1,5 @@
 import http from 'node:http';
+import zlib from 'node:zlib';
 import fs from 'node:fs/promises';
 import { existsSync, realpathSync, lstatSync, createWriteStream, createReadStream } from 'node:fs';
 import path from 'node:path';
@@ -92,7 +93,7 @@ async function startEngine(){
   const logsDir=path.join(DATA,'logs');await fs.mkdir(logsDir,{recursive:true});
   const logFile=path.join(logsDir,'engine.log');
   try{
-    const args=['serve','--model',path.join('G:\\','models','qwen3-coder-30b'),'--model-id','qwen3-coder-30b-a3b-colibri','--cap','40','--ctx','16384','--host','127.0.0.1','--port',String(ENGINE_PORT)];
+    const args=['serve','--model',path.join('G:\\','models','qwen3-coder-30b'),'--model-id','qwen3-coder-30b-a3b-colibri','--cap','40','--ctx','16384','--host','127.0.0.1','--port',String(ENGINE_PORT),'--queue-timeout','900'];
     engineProcess=spawn('py',['-3',path.join(COLIBRI_RUNTIME,'coli'),...args],{env:{...process.env,COLI_CUDA:'1',CUDA_DENSE:'1',CUDA_EXPERT_GB:'3',HEAT_FILE:'G:\\colibri_cache\\qwen.heat',COLI_CACHE_DIR:'G:\\colibri_cache',COLI_TOOL_FALLBACK:'1',COLI_CTX:'16384'},cwd:CALIBRI_ROOT,stdio:['ignore','pipe','pipe']});
     engineProcess.stdout.on('data',d=>{engineLogBuffer.push(d.toString());if(engineLogBuffer.length>500)engineLogBuffer=engineLogBuffer.slice(-500);console.log('[engine]',d.toString().trim());});
     engineProcess.stderr.on('data',d=>{engineLogBuffer.push('[err] '+d.toString());if(engineLogBuffer.length>500)engineLogBuffer=engineLogBuffer.slice(-500);});
@@ -570,6 +571,9 @@ async function probe(){
   if(config.provider==='local'){const selected=await selectedLocalModel();const r=await startLocal(selected.path);return {status:'ok',message:r.message};}
   if(config.provider==='claude'){const result=await detectClaude({configuredPath:config.claudePath||''});if(!result.available)throw fail('Claude Code не установлен. Откройте «Параметры → Компоненты».');return {status:'ok',message:'Claude Code найден. Авторизация и ответ проверяются отправкой сообщения.',...result};}
   if(config.provider==='colibri'){
+    // The engine is single-request: probing it mid-generation makes the probe
+    // queue behind the real answer and spam timeouts into the engine log.
+    if(requests.size)return {status:'ok',busy:true,message:'Colibri занят: генерация в процессе. Прокси на :8001 жив.'};
     const upstreamBase = (config.baseUrl || 'http://127.0.0.1:8001/v1').replace(/\/v1$/, '');
     const response = await fetch(upstreamBase + '/v1/models', { signal: AbortSignal.timeout(15000) });
     if (!response.ok) throw fail(`Colibri: HTTP ${response.status}. Запустите прокси на порту 8001.`, 502);
@@ -582,7 +586,7 @@ async function probe(){
   if(!response.ok)throw fail(`Проверка подключения: HTTP ${response.status}.`,502);
   const result=await response.json();return {status:'ok',message:'Сервер доступен. Генерация проверяется отправкой сообщения.',models:(result.data||[]).slice(0,100).map(m=>m.id)};
 }
-const mime={'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.svg':'image/svg+xml','.png':'image/png','.jpg':'image/jpeg','.pdf':'application/pdf','.ico':'image/x-icon'};
+const mime={'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.mjs':'text/javascript; charset=utf-8','.svg':'image/svg+xml','.png':'image/png','.jpg':'image/jpeg','.pdf':'application/pdf','.ico':'image/x-icon'};
 async function selectedLocalModel(settings=config){const available=await models(settings),byPath=settings.localModelPath&&available.find(m=>absolute(m.path)===absolute(settings.localModelPath));const byName=available.find(m=>m.name===settings.model);if(settings.model&&!['local'].includes(settings.model)&&!byName)throw fail('Выбранный GGUF не найден. Обновите список и запустите нужный файл модели.',404);const selected=byPath&&(!byName||byPath.name===settings.model)?byPath:byName||available[0];if(!selected)throw fail('В папке моделей нет GGUF. Выберите папку или добавьте модель.');return selected;}
 async function discoverModels(input={}){
   if(input.connectionId){const result=await testConnection(input.connectionId);return {models:result.models||[],message:result.message};}
@@ -664,8 +668,19 @@ async function buildPackage(personal){
   child.stderr.on('data',chunk=>{detail+=chunk.toString().slice(0,2000);});
   child.on('error',()=>{job.status='error';job.error='Не удалось запустить сборку.';});child.on('exit',code=>{job.status=code===0?'ready':'error';if(code!==0)job.error=redact(detail).slice(0,700)||'Не удалось собрать ZIP.';});return {id,status:job.status};
 }
-const send=(res,status,body)=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(JSON.stringify(body));};
+const send=(res,status,body)=>{
+  const s=JSON.stringify(body);
+  const h={'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'};
+  // gzip JSON bodies when the client can consume it (skips SSE / tiny payloads)
+  const req=res.reqRef;
+  if(req&&/\bgzip\b/.test(req.headers['accept-encoding']||'')){
+    const gz=zlib.gzipSync(s);
+    if(gz.length<s.length){h['Content-Encoding']='gzip';h['Content-Length']=gz.length;res.writeHead(status,h);return res.end(gz);}
+  }
+  h['Content-Length']=Buffer.byteLength(s);res.writeHead(status,h);res.end(s);
+};
 const server=http.createServer(async(req,res)=>{
+  res.reqRef=req; // used by send() to gzip responses when the client accepts it
   try{
     const host=req.headers.host;
     if(![`127.0.0.1:${PORT}`,`localhost:${PORT}`].includes(host))throw fail('Недопустимый Host.',403);
@@ -725,13 +740,28 @@ const server=http.createServer(async(req,res)=>{
       messages = messages
         .filter(m => m.content !== undefined && String(m.content).trim() !== '')
         .map(m => ({ ...m, content: String(m.content).replace(/<think[^>]*>[\s\S]*?<\/think>/gi, '').trim() }))
+        // Hard-cut raw XML tool-call markup from saved history: the model must
+        // never re-read its own broken XML output — it loops on it and stalls.
+        .map(m => {
+          const c = String(m.content)
+            .replace(/<function=[a-zA-Z_]\w*>[\s\S]*?<\/function>/g, '')
+            .replace(/<parameter=[a-zA-Z_]\w*>[\s\S]*?<\/parameter>/g, '')
+            .replace(/<\/?tool_call>/g, '').replace(/<\/?tool_response>/g, '')
+            .replace(/[ \t]*<\/?(?:function|parameter|tool_call|tool_response)[^>]*>/g, '')
+            .replace(/\n{3,}/g, '\n\n')
+            .trim();
+          return { ...m, content: c === '' && m.role === 'assistant'
+            ? '(ответ очищен: в нём была XML-разметка вызовов инструментов)'
+            : c };
+        })
         .filter(m => String(m.content).trim() !== '');
       if (messages.length === 0) return send(res, 400, { error: 'Нет сообщений для отправки' });
 
       // Build the agent system prompt
       const wsPath = absolute(config.workspace);
-      const skills = await skillList();
-      let agentSystem = [
+      const mode = body.mode === 'chat' ? 'chat' : 'agent';
+      const skills = mode === 'agent' ? await skillList() : [];
+      let agentSystem = mode === 'agent' ? [
         'Ты — Agent Lite, локальный агент-программист. Ты работаешь прямо в рабочей папке пользователя.',
         '',
         `Твоя рабочая папка: ${wsPath}`,
@@ -741,6 +771,9 @@ const server=http.createServer(async(req,res)=>{
         'Правила:',
         '- Если тебя просят прочитать файл — вызови инструмент read или grep, а не проси пользователя скопировать текст.',
         '- Если нужно исправить код — используй edit (точечная замена) или write (новый файл).',
+        '- НИКОГДА не пиши XML-теги (<function=...>, <parameter=...>, <tool_call>). Вызывай инструменты ТОЛЬКО через tool_calls (JSON) — текст никогда не исполняется.',
+        '- НИКОГДА не читай index.html и другие файлы целиком. Для правки: сначала grep по якорю, затем edit с точным old_string.',
+        '- Правка по якорю (навык edit-by-anchor): 1) grep якорь — ровно 1 совпадение; 2) edit с old_string = найденный фрагмент. НЕ ВЫЗЫВАЙ read для правки.',
         '- Если нужно выполнить команду (node --check, git status) — используй bash.',
         '- Если файл длинный — читай его кусками через read с offset/limit.',
         '- Если задача упоминает навык или просит «использовать навык» — сначала вызови read_skill с его именем и следуй инструкции.',
@@ -748,12 +781,12 @@ const server=http.createServer(async(req,res)=>{
         '',
         'Доступные навыки:',
         ...skills.map(s => `  ${s.name} — ${s.description}`),
-      ].join('\n');
+      ].join('\n') : 'Ты — полезный AI-ассистент. Отвечай на вопросы пользователя. У тебя нет доступа к файлам.';
 
       // Merge client-side system messages (e.g. compacted summary) into the
       // agent system prompt — Qwen templates expect a single leading system message.
       const clientSystem = messages.filter(m => m.role === 'system').map(m => String(m.content)).join('\n\n');
-      if (clientSystem) agentSystem += '\n\nКонтекст предыдущей сессии:\n' + clientSystem;
+      if (mode === 'agent' && clientSystem) agentSystem += '\n\nКонтекст предыдущей сессии:\n' + clientSystem;
       messages = messages.filter(m => m.role !== 'system');
 
       const base = (config.baseUrl || 'http://127.0.0.1:8001/v1').replace(/\/v1$/,'');
@@ -762,7 +795,7 @@ const server=http.createServer(async(req,res)=>{
 
       // Tools the proxy will forward (matches KEEP_TOOLS in colibri_proxy.py)
       const agentTools = [
-        tool('read','Прочитать файл из рабочей папки.',{path:str('Путь к файлу, можно с offset/limit для длинных файлов.'),offset:{type:'integer',description:'С какой строки читать.'},limit:{type:'integer',description:'Сколько строк читать.'}},['path']),
+        tool('read','Прочитать файл из рабочей папки. Без limit возвращает первые 200 строк.',{path:str('Путь к файлу, можно с offset/limit для длинных файлов.'),offset:{type:'integer',description:'С какой строки читать.'},limit:{type:'integer',description:'Сколько строк читать (по умолчанию 200).'}},['path']),
         tool('write','Создать или перезаписать файл.',{path:str('Путь к файлу.'),content:str('Полное содержимое файла.')},['path','content']),
         tool('edit','Точечная замена в файле.',{path:str('Путь к файлу.'),old_string:str('Точный текст для поиска.'),new_string:str('Замена.')},['path','old_string','new_string']),
         tool('list','Список файлов в папке.',{path:str('Папка, пусто для корня.')}),
@@ -773,6 +806,24 @@ const server=http.createServer(async(req,res)=>{
 
       const toolEvents = [];
       let fullMessages = [{ role: 'system', content: agentSystem }, ...messages];
+
+      // Switch to SSE streaming
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream; charset=utf-8',
+        'Cache-Control': 'no-store',
+        'Connection': 'keep-alive',
+        'X-Content-Type-Options': 'nosniff',
+        'X-Accel-Buffering': 'no',
+        'Content-Encoding': 'none',
+      });
+      // Heartbeat: keep the connection alive through long silent prefill phases
+      // (model says nothing for minutes while reading experts from disk).
+      const hb = setInterval(() => { if (!res.destroyed) res.write(': ping\n\n'); }, 15000);
+      res.on('close', () => clearInterval(hb));
+      const emit = (data) => {
+        if (res.destroyed) return;
+        res.write(`data: ${JSON.stringify(data)}\n\n`);
+      };
 
       try {
         for (let round = 0; round < 8; round++) {
@@ -785,32 +836,67 @@ const server=http.createServer(async(req,res)=>{
               max_tokens: maxTok,
               stream: false,
               enable_thinking: false,
-              tools: agentTools,
-              tool_choice: 'auto',
+              ...(mode === 'agent' ? { tools: agentTools, tool_choice: 'auto' } : {}),
             }),
-            signal: AbortSignal.timeout(300_000),
+            // Engine can be silent for several minutes (disk-bound prefill);
+            // the old 300 s wall here killed multi-tool tasks mid-answer.
+            signal: AbortSignal.timeout(900_000),
           });
           if (!resp.ok) {
             const errText = await resp.text().catch(() => '');
-            return send(res, 502, { error: `Upstream ${resp.status}: ${errText.slice(0, 300)}` });
+            emit({ type: 'error', message: `Upstream ${resp.status}: ${errText.slice(0, 300)}` });
+            res.end();
+            return;
           }
           const data = await resp.json();
           const choice = data.choices?.[0];
 
-          if (!choice) return send(res, 502, { error: 'Пустой ответ от модели' });
+          if (!choice) { emit({ type: 'error', message: 'Пустой ответ от модели' }); res.end(); return; }
+
+          // ── Qwen-style XML tool-call interceptor ─────────────────────────
+          // Some local models emit <function=name><parameter=k>v</parameter></function>
+          // (often wrapped in <tool_call>…</tool_call>) instead of JSON tool_calls.
+          // Parse those blocks, strip them from the visible content and convert
+          // them into real tool calls so the UI shows tool cards.
+          let msg = choice.message || {};
+          let content = typeof msg.content === 'string' ? msg.content : (msg.content == null ? '' : String(msg.content));
+          let toolCalls = Array.isArray(msg.tool_calls) ? msg.tool_calls.slice() : [];
+          const xmlBlockRe = /<function=[a-zA-Z_]\w*>[\s\S]*?<\/function>/g;
+          if (mode === 'agent' && toolCalls.length === 0 && xmlBlockRe.test(content)) {
+            const parsed = [];
+            for (const block of content.match(/<function=[a-zA-Z_]\w*>[\s\S]*?<\/function>/g) || []) {
+              const fm = block.match(/^<function=([a-zA-Z_]\w*)>([\s\S]*?)<\/function>$/);
+              if (!fm) continue;
+              const fnArgs = {};
+              for (const pm of fm[2].matchAll(/<parameter=([a-zA-Z_]\w*)>([\s\S]*?)<\/parameter>/g)) {
+                fnArgs[pm[1]] = pm[2].trim();
+              }
+              parsed.push({ id: `xml_${round}_${parsed.length}`, type: 'function', function: { name: fm[1], arguments: JSON.stringify(fnArgs) } });
+            }
+            if (parsed.length) {
+              toolCalls = parsed;
+              emit({ type: 'xml_intercepted', round, tools: parsed.map(t => t.function.name) });
+            }
+          }
+          // Strip stray XML only in agent mode — chat answers pass through verbatim
+          if (mode === 'agent' && content) content = content.replace(xmlBlockRe, '').replace(/<\/?tool_call>/g, '').trim();
 
           // Model wants to call a tool
-          if (choice.message?.tool_calls?.length > 0) {
-            fullMessages.push({ role: 'assistant', content: choice.message.content || '', tool_calls: choice.message.tool_calls });
-            for (const tc of choice.message.tool_calls) {
+          if (mode === 'agent' && toolCalls.length > 0) {
+            fullMessages.push({ role: 'assistant', content, tool_calls: toolCalls });
+            // Forward intermediate reasoning so the UI can tuck it into <details>
+            if (content && content.trim()) emit({ type: 'reasoning', round, text: content.trim().slice(0, 4000) });
+            for (const tc of toolCalls) {
               const fnName = tc.function?.name || '';
               let args = {};
               try { args = JSON.parse(tc.function?.arguments || '{}'); } catch { args = { raw: tc.function?.arguments }; }
 
               const evt = { tool: fnName, args, round };
               toolEvents.push(evt);
+              emit({ type: 'tool_call', round, tool: fnName, args });
 
               let toolResult;
+              let fileChange = null;
               try {
                 switch (fnName) {
                   case 'read': {
@@ -818,16 +904,22 @@ const server=http.createServer(async(req,res)=>{
                     let text = await readText(p);
                     const lines = text.split('\n');
                     const off = Math.max(0, parseInt(args.offset, 10) || 0);
-                    const lim = args.limit ? Math.min(parseInt(args.limit, 10), lines.length) : lines.length;
-                    text = lines.slice(off, off + lim).join('\n');
+                    const lim = args.limit ? Math.min(parseInt(args.limit, 10), lines.length) : Math.min(200, lines.length);
+                    const shown = lines.slice(off, off + lim).join('\n');
+                    text = (off + lim < lines.length)
+                      ? shown + `\n… (показаны строки ${off + 1}–${off + lim} из ${lines.length}; продолжай через offset/limit)`
+                      : shown;
                     toolResult = text;
                     break;
                   }
                   case 'write': {
                     const p = workspacePath(String(args.path || '').trim());
+                    let prev = '';
+                    try { prev = await fs.readFile(p, 'utf8'); } catch {}
                     await fs.mkdir(path.dirname(p), { recursive: true });
                     await fs.writeFile(p, String(args.content || ''), 'utf8');
                     toolResult = `Файл ${args.path} записан (${String(args.content || '').length} байт).`;
+                    fileChange = { path: String(args.path || ''), operation: prev ? 'write' : 'create', old: prev, new: String(args.content || '') };
                     break;
                   }
                   case 'edit': {
@@ -836,11 +928,12 @@ const server=http.createServer(async(req,res)=>{
                     const newStr = String(args.new_string || '');
                     let fileContent = await fs.readFile(p, 'utf8');
                     const idx = fileContent.indexOf(oldStr);
-                    if (idx === -1) { toolResult = `Ошибка: old_string не найден в ${args.path}. Проверь точный текст через read или grep.`; break; }
-                    if (fileContent.indexOf(oldStr, idx + 1) !== -1) { toolResult = `Ошибка: old_string встречается более одного раза в ${args.path}. Уточни якорь.`; break; }
+                    if (idx === -1) { toolResult = `Error executing tool: old_string не найден в ${args.path}. Проверь точный текст через read или grep.`; break; }
+                    if (fileContent.indexOf(oldStr, idx + 1) !== -1) { toolResult = `Error executing tool: old_string встречается более одного раза в ${args.path}. Уточни якорь.`; break; }
                     fileContent = fileContent.replace(oldStr, newStr);
                     await fs.writeFile(p, fileContent, 'utf8');
                     toolResult = `Заменено в ${args.path} на строке ${fileContent.slice(0, idx).split('\n').length}.`;
+                    fileChange = { path: String(args.path || ''), operation: 'edit', old: oldStr, new: newStr };
                     break;
                   }
                   case 'list': {
@@ -853,7 +946,7 @@ const server=http.createServer(async(req,res)=>{
                     const p = workspacePath(String(args.path || '').trim());
                     const pattern = String(args.pattern || '');
                     const results = [];
-                    if (fs.existsSync(p) && fs.lstatSync(p).isFile()) {
+                    if (existsSync(p) && lstatSync(p).isFile()) {
                       const lines = (await fs.readFile(p, 'utf8')).split('\n');
                       lines.forEach((line, i) => { if (line.includes(pattern)) results.push(`L${i + 1}: ${line.trim()}`); });
                       toolResult = results.length ? results.join('\n') : 'Совпадений нет';
@@ -905,23 +998,27 @@ const server=http.createServer(async(req,res)=>{
                     toolResult = `Неизвестный инструмент: ${fnName}`;
                 }
               } catch (e) {
-                toolResult = `Ошибка: ${e.message}`;
+                toolResult = `Error executing tool: ${e.message}`;
               }
               evt.result = String(toolResult).slice(0, 2000);
+              emit({ type: 'tool_result', round, tool: fnName, result: evt.result });
+              if (fileChange) emit({ type: 'file_change', ...fileChange });
               fullMessages.push({ role: 'tool', tool_call_id: tc.id, content: String(toolResult) });
             }
             continue; // Next round: model sees tool results
           }
 
-          // Final answer
-          const reply = choice.message?.content ?? JSON.stringify(data);
+          // Final answer (already stripped of any stray XML tool-call text)
+          let reply = (content && content.trim()) ? content : (choice.message?.content ?? JSON.stringify(data));
+          if (mode === 'agent') reply = reply.replace(xmlBlockRe, '').replace(/<\/?tool_call>/g, '').trim() || 'Пустой ответ от модели';
           // Track current context fill = tokens of the latest request
           const usage = data.usage;
           if (usage) ctxTokens = (usage.prompt_tokens || 0) + (usage.completion_tokens || 0);
           // Client sends the whole history each turn — mirror it, don't append
           chatHistory = [...messages, { role: 'assistant', content: reply }];
-          return send(res, 200, {
-            choices: [{ message: { role: 'assistant', content: reply } }],
+          emit({
+            type: 'done',
+            reply,
             tool_events: toolEvents,
             total_rounds: round + 1,
             usage: {
@@ -930,10 +1027,15 @@ const server=http.createServer(async(req,res)=>{
               pct: Math.min(100, Math.round(ctxTokens / 16384 * 100)),
             },
           });
+          res.end();
+          return;
         }
-        return send(res, 502, { error: 'Слишком много раундов инструментов (макс. 8)' });
+        emit({ type: 'error', message: 'Слишком много раундов инструментов (макс. 8)' });
+        res.end();
+        return;
       } catch (e) {
-        return send(res, 502, { error: e.message, tool_events: toolEvents });
+        emit({ type: 'error', message: e.message, tool_events: toolEvents });
+        res.end();
       }
     }
     // POST /api/context/compact — summarize old messages, keep last N
@@ -1143,7 +1245,13 @@ const server=http.createServer(async(req,res)=>{
     noLinks(publicRoot,file);
     let content=await fs.readFile(file);const nonce=asset==='index.html'?randomBytes(18).toString('base64'):'';
     if(nonce)content=content.toString('utf8').replace('</head>','<meta name="engee-style-nonce" content="'+nonce+'">\n</head>');
-    res.writeHead(200,{'Content-Type':mime[path.extname(file)]||'application/octet-stream','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self'"+(nonce?" 'nonce-"+nonce+"'":"")+"; img-src 'self' data:; connect-src 'self' https://*.puter.com https://*.puter.site wss://api.puter.com; frame-src https://*.puter.com https://puter.com; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"});res.end(content);
+    const headers={'Content-Type':mime[path.extname(file)]||'application/octet-stream','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self'"+(nonce?" 'nonce-"+nonce+"'":"")+"; img-src 'self' data:; connect-src 'self' https://*.puter.com https://*.puter.site wss://api.puter.com; frame-src https://*.puter.com https://puter.com; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"};
+    // gzip static assets >= 1 KB when the client accepts it
+    if(/\bgzip\b/.test(req.headers['accept-encoding']||'')&&content.length>=1024){
+      const gz=zlib.gzipSync(content);
+      if(gz.length<content.length){headers['Content-Encoding']='gzip';headers['Content-Length']=gz.length;res.writeHead(200,headers);return res.end(gz);}
+    }
+    headers['Content-Length']=content.length;res.writeHead(200,headers);res.end(content);
   }catch(e){if(!res.headersSent)send(res,e.status|| (e.code==='ENOENT'?404:500),{error:redact(e.message||'Ошибка приложения.')});else res.end();}
 });
 // --- API-эндпоинт для внешних моделей (Codex, OpenCode и т.д.) ---
@@ -1204,6 +1312,9 @@ if (API_PROXY_ENABLED) {
   apiProxyServer.listen(API_PROXY_PORT, '127.0.0.1', () => console.log(`API-эндпоинт: http://127.0.0.1:${API_PROXY_PORT}/v1/chat/completions`));
 }
 
+// SSE chats run for many minutes (multi-tool agent loops with silent
+// prefill phases); Node 24 kills sockets after 5 minutes by default.
+server.requestTimeout = 0;
 server.on('error',error=>{console.error(error.code==='EADDRINUSE'?`Порт ${PORT} занят. Запустите EngeeAgent.exe для автоматического выбора порта.`:redact(error.message));process.exit(1);});
 server.listen(PORT,'127.0.0.1',()=>console.log(`Engee Agent: http://127.0.0.1:${PORT}/`));
 for(const signal of ['SIGINT','SIGTERM'])process.on(signal,async()=>{for(const item of requests)item.controller.abort();closeAllTerminals();await closeJuliaRuns();server.closeAllConnections();server.close(()=>process.exit(0));});
