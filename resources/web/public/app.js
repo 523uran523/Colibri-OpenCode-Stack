@@ -1,5 +1,5 @@
 /**
- * Agent Lite v3 — SPA with modals + context tracking + project switcher
+ * Agent Lite v4 — menu, chat sessions, input history
  */
 
 const $ = s => document.querySelector(s);
@@ -22,86 +22,281 @@ $$('.modal-overlay').forEach(ov => {
   ov.addEventListener('click', e => { if (e.target === ov) closeModal(ov.id.replace('modal-', '')); });
 });
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') $$('.modal-overlay:not([hidden])').forEach(ov => closeModal(ov.id.replace('modal-', '')));
+  if (e.key === 'Escape') {
+    closeMenu();
+    $$('.modal-overlay:not([hidden])').forEach(ov => closeModal(ov.id.replace('modal-', '')));
+  }
 });
 
-// Open modals from header
-$('#btn-settings').addEventListener('click', () => openModal('settings'));
-$('#btn-files').addEventListener('click', () => { loadFiles(); openModal('files'); });
-$('#btn-skills').addEventListener('click', () => { loadSkills(); openModal('skills'); });
-$('#btn-logs').addEventListener('click', () => { refreshLogs(); openModal('logs'); });
+// ── Menu ───────────────────────────────────────────────────────────
+const menu = $('#menu');
+const btnMenu = $('#btn-menu');
+function closeMenu() { menu.hidden = true; }
+btnMenu.addEventListener('click', e => {
+  e.stopPropagation();
+  menu.hidden = !menu.hidden;
+});
+document.addEventListener('click', e => {
+  if (!menu.hidden && !menu.contains(e.target) && !btnMenu.contains(e.target)) closeMenu();
+});
+menu.querySelectorAll('[data-open]').forEach(btn => btn.addEventListener('click', () => {
+  const name = btn.dataset.open;
+  closeMenu();
+  if (name === 'files') loadFiles();
+  if (name === 'skills') loadSkills();
+  if (name === 'logs') refreshLogs();
+  openModal(name);
+}));
 
 // ── Theme ─────────────────────────────────────────────────────────
-const saved = localStorage.getItem('agentlite-theme') || 'dark';
-document.documentElement.dataset.theme = saved;
-$('#theme-btn').addEventListener('click', () => {
+const themeBtn = $('#theme-btn');
+document.documentElement.dataset.theme = localStorage.getItem('agentlite-theme') || 'dark';
+function syncThemeLabel() {
+  themeBtn.textContent = document.documentElement.dataset.theme === 'light' ? '🌙 Тёмная тема' : '☀️ Светлая тема';
+}
+syncThemeLabel();
+themeBtn.addEventListener('click', () => {
   const next = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
   document.documentElement.dataset.theme = next;
   localStorage.setItem('agentlite-theme', next);
+  syncThemeLabel();
+  closeMenu();
 });
+
+// ── State: sessions / current chat ────────────────────────────────
+const SESS_KEY = 'agentlite-sessions-v1';
+const CUR_KEY  = 'agentlite-current-session';
+const MAX_SESSIONS = 10;
+
+let sessions = [];
+let currentId = null;
+let history = [];
+
+const msgs = $('#msgs');
+const welcomeEl = msgs.querySelector('.msgs__welcome');
+
+function uid() { return 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+function currentSession() { return sessions.find(s => s.id === currentId) || null; }
+
+function saveSessions() {
+  sessions.sort((a, b) => b.updatedAt - a.updatedAt);
+  sessions = sessions.slice(0, MAX_SESSIONS);
+  try {
+    localStorage.setItem(SESS_KEY, JSON.stringify(sessions));
+    localStorage.setItem(CUR_KEY, currentId || '');
+  } catch {}
+}
+
+function persistCurrent() {
+  const s = currentSession();
+  if (!s) return;
+  s.messages = history;
+  s.updatedAt = Date.now();
+  if (!s.title || s.title === 'Новый чат') {
+    const first = history.find(m => m.role === 'user');
+    if (first) s.title = String(first.content).replace(/\s+/g, ' ').trim().slice(0, 48) || 'Новый чат';
+  }
+  saveSessions();
+}
+
+function createSession() {
+  const s = { id: uid(), title: 'Новый чат', updatedAt: Date.now(), tokens: 0, messages: [] };
+  sessions.unshift(s);
+  currentId = s.id;
+  history = [];
+  saveSessions();
+  return s;
+}
+
+function loadSessions() {
+  try { sessions = JSON.parse(localStorage.getItem(SESS_KEY) || '[]'); } catch { sessions = []; }
+  if (!Array.isArray(sessions)) sessions = [];
+  sessions = sessions
+    .filter(s => s && s.id)
+    .map(s => ({
+      id: s.id,
+      title: s.title || 'Новый чат',
+      updatedAt: Number(s.updatedAt) || Date.now(),
+      tokens: Number(s.tokens) || 0,
+      messages: Array.isArray(s.messages)
+        ? s.messages.filter(m => m && ['user', 'assistant', 'system'].includes(m.role) && typeof m.content === 'string')
+        : [],
+    }))
+    .sort((a, b) => b.updatedAt - a.updatedAt);
+  currentId = localStorage.getItem(CUR_KEY) || null;
+  let cur = sessions.find(s => s.id === currentId) || sessions[0];
+  if (!cur) { createSession(); return; }
+  currentId = cur.id;
+  history = cur.messages;
+  localStorage.setItem(CUR_KEY, currentId);
+}
+
+// ── Chat rendering ────────────────────────────────────────────────
+function updateWelcome() {
+  if (welcomeEl) welcomeEl.hidden = msgs.querySelector('.msg') !== null;
+}
+function clearMessages() {
+  msgs.querySelectorAll('.msg').forEach(el => el.remove());
+  updateWelcome();
+}
+function addMsg(role, content) {
+  const div = document.createElement('div');
+  div.className = `msg msg--${role}`;
+  const roleEl = document.createElement('div');
+  roleEl.className = 'msg__role';
+  roleEl.textContent = role === 'user' ? 'Вы' : 'Agent';
+  const bubble = document.createElement('div');
+  bubble.className = 'msg__bubble';
+  bubble.textContent = content;
+  div.append(roleEl, bubble);
+  msgs.appendChild(div);
+  updateWelcome();
+  msgs.scrollTop = msgs.scrollHeight;
+  return bubble;
+}
+function addSystemMsg(content) {
+  const div = document.createElement('div');
+  div.className = 'msg msg--system';
+  const roleEl = document.createElement('div');
+  roleEl.className = 'msg__role';
+  roleEl.textContent = 'Контекст';
+  const bubble = document.createElement('div');
+  bubble.className = 'msg__bubble';
+  bubble.textContent = content;
+  div.append(roleEl, bubble);
+  msgs.appendChild(div);
+  updateWelcome();
+  msgs.scrollTop = msgs.scrollHeight;
+}
+function renderSession() {
+  clearMessages();
+  for (const m of history) {
+    if (m.role === 'user' || m.role === 'assistant') addMsg(m.role, m.content);
+    else if (m.role === 'system') addSystemMsg(m.content);
+  }
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+// ── Session switching ─────────────────────────────────────────────
+const histList = $('#hist-list');
+
+function renderHistoryList() {
+  histList.innerHTML = '';
+  if (!sessions.length) {
+    histList.innerHTML = '<li class="hist-empty">Нет сохранённых чатов</li>';
+    return;
+  }
+  sessions.forEach(s => {
+    const li = document.createElement('li');
+    li.className = 'hist-item' + (s.id === currentId ? ' sel' : '');
+    const info = document.createElement('div');
+    info.className = 'hist-info';
+    const title = document.createElement('div');
+    title.className = 'hist-title';
+    title.textContent = s.title || 'Без названия';
+    const meta = document.createElement('div');
+    meta.className = 'hist-meta';
+    const d = new Date(s.updatedAt);
+    meta.textContent = d.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+      + ' · ' + (s.messages?.length || 0) + ' сообщ.';
+    info.append(title, meta);
+    const del = document.createElement('button');
+    del.className = 'hist-del';
+    del.textContent = '✕';
+    del.title = 'Удалить чат';
+    del.addEventListener('click', ev => deleteSession(s.id, ev));
+    li.append(info, del);
+    li.addEventListener('click', () => switchSession(s.id));
+    histList.appendChild(li);
+  });
+}
+
+function switchSession(id) {
+  if (id === currentId) { closeModal('history'); return; }
+  persistCurrent();
+  const s = sessions.find(x => x.id === id);
+  if (!s) return;
+  currentId = id;
+  history = Array.isArray(s.messages) ? s.messages : [];
+  localStorage.setItem(CUR_KEY, currentId);
+  renderSession();
+  setContext(s.tokens || 0, 16384);
+  renderHistoryList();
+  closeModal('history');
+  promptEl.focus();
+}
+
+function newChat() {
+  persistCurrent();
+  createSession();
+  clearMessages();
+  setContext(0, 16384);
+  renderHistoryList();
+  closeModal('history');
+  closeMenu();
+  promptEl.focus();
+}
+
+function deleteSession(id, ev) {
+  if (ev) ev.stopPropagation();
+  const wasCurrent = id === currentId;
+  sessions = sessions.filter(s => s.id !== id);
+  if (wasCurrent) {
+    const next = sessions[0];
+    if (next) { currentId = next.id; history = next.messages || []; }
+    else { createSession(); }
+    renderSession();
+    setContext(currentSession()?.tokens || 0, 16384);
+  }
+  saveSessions();
+  renderHistoryList();
+}
+
+$('#btn-history').addEventListener('click', () => { renderHistoryList(); openModal('history'); });
+$('#btn-newchat').addEventListener('click', newChat);
+$('#hist-new').addEventListener('click', newChat);
 
 // ── Context ring ───────────────────────────────────────────────────
 const ctxBtn   = $('#ctx-btn');
-const ctxFg    = document.querySelector('.ctx__ring-fg');
+const ctxFg    = $('.ctx__ring-fg');
 const ctxLabel = $('#ctx-label');
 
-function setContext(tokens, max) {
-  const pct = Math.min(100, Math.round(tokens / max * 100));
+function setContext(tokens, max = 16384) {
+  const pct = Math.max(0, Math.min(100, Math.round(tokens / max * 100)));
   ctxLabel.textContent = pct + '%';
   ctxBtn.classList.remove('ctx--warn', 'ctx--crit');
   if (pct > 90) ctxBtn.classList.add('ctx--crit');
   else if (pct > 70) ctxBtn.classList.add('ctx--warn');
-  // SVG ring: circumference of r=15.9155 ≈ 100
   ctxFg.style.strokeDasharray = `${pct}, 100`;
-  ctxBtn.title = `Контекст: ${tokens} / ${max} токенов (${pct}%)`;
+  ctxBtn.title = `Контекст: ${tokens} / ${max} токенов (${pct}%). Нажмите, чтобы сжать.`;
 }
 
-// Load initial context
-fetch('/api/context/stats').then(r => r.json()).then(d => {
-  if (d.current_tokens !== undefined) setContext(d.current_tokens, d.max_tokens || 16384);
-}).catch(() => {});
-
-// Compact button
 ctxBtn.addEventListener('click', async () => {
   if (ctxBtn.classList.contains('ctx--busy')) return;
+  if (!history.length) { alert('История пуста — нечего сжимать.'); return; }
   ctxBtn.classList.add('ctx--busy');
   ctxLabel.textContent = '…';
-  ctxLabel.style.color = 'var(--muted)';
   try {
     const r = await fetch('/api/context/compact', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: '{}',
+      body: JSON.stringify({ messages: history }),
     });
-    const d = await r.json();
-    if (d.compacted) {
-      // Clear the visible chat history (server replaced it with summary)
-      msgs.innerHTML = '';
-      history = d.new_history || [];
-      const div = document.createElement('div');
-      div.className = 'msg msg--system';
-      div.innerHTML = `<div class="msg__role">Контекст сжат</div>
-        <div class="msg__bubble" style="font-size:12px;color:var(--muted)">
-          ${d.summary?.replace(/</g, '&lt;')}…<br>
-          Сохранено ${d.kept_messages} последних сообщений.
-        </div>`;
-      msgs.appendChild(div);
-      setContext(0, 16384);
-      // Show a system notification in chat
-      addMsg('system', '🗜️ Контекст сжат: ' + (d.summary || '').slice(0, 200) + '…');
-      msgs.querySelector('.msg--system:last-child')?.remove(); // we already added the styled one
-    } else if (d.error) {
-      alert('Ошибка: ' + d.error);
-    } else {
-      alert(d.message || 'Нечего сжимать');
-    }
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || d.error) throw new Error(d.error || `HTTP ${r.status}`);
+    if (!d.compacted) { alert(d.message || 'Нечего сжимать'); return; }
+    history = Array.isArray(d.new_history) ? d.new_history : history;
+    const s = currentSession();
+    if (s) s.tokens = d.usage?.current_tokens || 0;
+    persistCurrent();
+    renderSession();
+    setContext(d.usage?.current_tokens || 0, d.usage?.max_tokens || 16384);
   } catch (e) {
     alert('Ошибка сжатия: ' + e.message);
   } finally {
     ctxBtn.classList.remove('ctx--busy');
-    ctxLabel.style.color = '';
-    setContext(0, 16384);
-    fetch('/api/context/stats').then(r => r.json()).then(d => setContext(d.current_tokens, d.max_tokens)).catch(() => {});
+    const s = currentSession();
+    setContext(s?.tokens || 0, 16384);
   }
 });
 
@@ -115,12 +310,12 @@ const engPanelLabel = $('#eng-panel-label');
 
 function setEngineState(state, label) {
   engineDot.className = 'dot';
-  engPanelDot.className = 'dot';
-  if (state === 'on')  { engineDot.classList.add('dot--on');  engPanelDot.classList.add('dot--on'); }
-  if (state === 'run') { engineDot.classList.add('dot--run'); engPanelDot.classList.add('dot--run'); }
-  if (state === 'err') { engineDot.classList.add('dot--err'); engPanelDot.classList.add('dot--err'); }
+  if (engPanelDot) engPanelDot.className = 'dot';
+  if (state === 'on')  { engineDot.classList.add('dot--on');  if (engPanelDot) engPanelDot.classList.add('dot--on'); }
+  if (state === 'run') { engineDot.classList.add('dot--run'); if (engPanelDot) engPanelDot.classList.add('dot--run'); }
+  if (state === 'err') { engineDot.classList.add('dot--err'); if (engPanelDot) engPanelDot.classList.add('dot--err'); }
   engineLabel.textContent = label;
-  engPanelLabel.textContent = label;
+  if (engPanelLabel) engPanelLabel.textContent = label;
   btnStart.disabled = state === 'on' || state === 'run';
   btnStop.disabled  = !(state === 'on');
 }
@@ -130,13 +325,17 @@ async function checkEngine() {
     await fetch('/api/health');
     const llm = await fetch('/api/probe').then(x => x.json()).catch(() => ({}));
     if (llm.error) setEngineState('err', 'Прокси недоступен');
-    else setEngineState('on', llm.model || 'Qwen готов');
+    else {
+      setEngineState('on', 'Qwen готов');
+      engineLabel.title = llm.model || 'Qwen готов';
+    }
   } catch {
     setEngineState('', 'Сервер не запущен');
   }
 }
 
 btnStart.addEventListener('click', async () => {
+  closeMenu();
   setEngineState('run', 'Запуск…');
   try {
     await fetch('/api/engine/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
@@ -153,6 +352,7 @@ btnStart.addEventListener('click', async () => {
 });
 
 btnStop.addEventListener('click', async () => {
+  closeMenu();
   setEngineState('run', 'Остановка…');
   try { await fetch('/api/engine/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); }
   catch {}
@@ -160,7 +360,6 @@ btnStop.addEventListener('click', async () => {
 });
 
 // ── Chat ──────────────────────────────────────────────────────────
-const msgs       = $('#msgs');
 const form       = $('#chat-form');
 const promptEl   = $('#prompt');
 const thinking   = $('#thinking');
@@ -168,32 +367,17 @@ const thinkingTx = $('#thinking-text');
 const sendBtn    = $('#send-btn');
 const stopBtn    = $('#stop-btn');
 
-let history = [];
-
-function addMsg(role, content) {
-  const welcome = msgs.querySelector('.msgs__welcome');
-  if (welcome) welcome.remove();
-  const div = document.createElement('div');
-  div.className = `msg msg--${role}`;
-  const roleEl = document.createElement('div');
-  roleEl.className = 'msg__role';
-  roleEl.textContent = role === 'user' ? 'Вы' : role === 'system' ? 'Система' : 'Agent';
-  const bubble = document.createElement('div');
-  bubble.className = 'msg__bubble';
-  bubble.textContent = content;
-  div.append(roleEl, bubble);
-  msgs.appendChild(div);
-  msgs.scrollTop = msgs.scrollHeight;
-  return bubble;
-}
+let chatAbort = null;
 
 form.addEventListener('submit', async e => {
   e.preventDefault();
   const text = promptEl.value.trim();
   if (!text) return;
   promptEl.value = '';
+  pushInputHistory(text);
   addMsg('user', text);
   history.push({ role: 'user', content: text });
+  persistCurrent();
 
   thinking.hidden = false;
   thinkingTx.textContent = 'Модель думает…';
@@ -201,14 +385,15 @@ form.addEventListener('submit', async e => {
   stopBtn.hidden = false;
 
   const bubble = addMsg('assistant', '…');
-  let aborted = false;
-  stopBtn.onclick = () => { aborted = true; stopBtn.hidden = true; };
+  chatAbort = new AbortController();
+  stopBtn.onclick = () => { try { chatAbort.abort(); } catch {} };
 
   try {
     const resp = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ messages: history }),
+      signal: chatAbort.signal,
     });
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({}));
@@ -218,26 +403,34 @@ form.addEventListener('submit', async e => {
     const reply = data.choices?.[0]?.message?.content ?? JSON.stringify(data);
     bubble.textContent = reply;
     history.push({ role: 'assistant', content: reply });
-    // Show tool-call events
+
     if (data.tool_events?.length) {
       const toolDiv = document.createElement('div');
       toolDiv.className = 'msg msg--tools';
       toolDiv.innerHTML = '<div class="msg__role">Инструменты</div>' +
-        data.tool_events.map(e =>
-          `<div class="tool-event">${e.tool === 'bash' ? '⚡' : e.tool === 'read_skill' ? '🧩' : '⚙️'} <b>${e.tool}</b>(${JSON.stringify(e.args).slice(0, 120)})</div>`
+        data.tool_events.map(ev =>
+          `<div class="tool-event">${ev.tool === 'bash' ? '⚡' : ev.tool === 'read_skill' ? '🧩' : '⚙️'} <b>${ev.tool}</b>(${JSON.stringify(ev.args).slice(0, 120)})</div>`
         ).join('');
       msgs.appendChild(toolDiv);
+      msgs.scrollTop = msgs.scrollHeight;
     }
-    // Update context indicator
-    if (data.usage) setContext(data.usage.current_tokens, data.usage.max_tokens);
+
+    if (data.usage) {
+      const s = currentSession();
+      if (s) s.tokens = data.usage.current_tokens || 0;
+      setContext(data.usage.current_tokens || 0, data.usage.max_tokens || 16384);
+    }
+    persistCurrent();
   } catch (err) {
-    if (aborted) {
+    if (err.name === 'AbortError') {
       bubble.textContent = '⏹ Остановлено';
+      bubble.style.color = 'var(--muted)';
     } else {
       bubble.textContent = `Ошибка: ${err.message}`;
       bubble.style.color = 'var(--error)';
     }
   } finally {
+    chatAbort = null;
     thinking.hidden = true;
     thinkingTx.textContent = 'Модель думает…';
     sendBtn.disabled = false;
@@ -255,6 +448,56 @@ $('#attach-input').addEventListener('change', async e => {
     promptEl.value += `\n\nФайл: ${f.name}\n\`\`\`\n${txt.slice(0, 4000)}\n\`\`\``;
   }
   e.target.value = '';
+});
+
+// ── Input history (↑ / ↓) ─────────────────────────────────────────
+const INPUT_KEY = 'agentlite-input-history';
+let inputHistory = [];
+try { inputHistory = JSON.parse(localStorage.getItem(INPUT_KEY) || '[]'); } catch { inputHistory = []; }
+if (!Array.isArray(inputHistory)) inputHistory = [];
+let inputIdx = -1;
+let inputDraft = '';
+
+function pushInputHistory(text) {
+  if (inputHistory[inputHistory.length - 1] !== text) inputHistory.push(text);
+  if (inputHistory.length > 50) inputHistory = inputHistory.slice(-50);
+  inputIdx = -1;
+  inputDraft = '';
+  try { localStorage.setItem(INPUT_KEY, JSON.stringify(inputHistory)); } catch {}
+}
+
+function onFirstLine(el) {
+  return el.value.lastIndexOf('\n', Math.max(0, el.selectionStart - 1)) === -1;
+}
+function onLastLine(el) {
+  return el.value.indexOf('\n', el.selectionEnd) === -1;
+}
+
+promptEl.addEventListener('keydown', e => {
+  if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+  if (!inputHistory.length) return;
+  if (e.key === 'ArrowUp' && !onFirstLine(promptEl)) return;
+  if (e.key === 'ArrowDown' && !onLastLine(promptEl)) return;
+  e.preventDefault();
+  if (e.key === 'ArrowUp') {
+    if (inputIdx === -1) {
+      inputDraft = promptEl.value;
+      inputIdx = inputHistory.length - 1;
+    } else if (inputIdx > 0) {
+      inputIdx--;
+    }
+    promptEl.value = inputHistory[inputIdx];
+  } else {
+    if (inputIdx === -1) return;
+    if (inputIdx < inputHistory.length - 1) {
+      inputIdx++;
+      promptEl.value = inputHistory[inputIdx];
+    } else {
+      inputIdx = -1;
+      promptEl.value = inputDraft;
+    }
+  }
+  promptEl.selectionStart = promptEl.selectionEnd = promptEl.value.length;
 });
 
 // ── Settings modal ────────────────────────────────────────────────
@@ -366,6 +609,7 @@ async function openFile(f, li) {
     curFile = rel;
     fsName.textContent = rel;
     fsContent.textContent = text;
+    fsContent.style.color = '';
     fsContent.contentEditable = 'true';
     $('#fs-save').hidden = false;
     fsList.querySelectorAll('li').forEach(x => x.classList.remove('sel'));
@@ -378,7 +622,6 @@ async function openFile(f, li) {
 
 $('#fs-go').addEventListener('click', loadFiles);
 
-// Project switcher
 async function switchProject() {
   const newRoot = fsRoot.value.trim();
   if (!newRoot) { fsResult.textContent = 'Введите путь'; fsResult.className = 'fs-result fs-result--err'; return; }
@@ -469,6 +712,46 @@ async function loadSkills() {
   }
 }
 
+$('#sk-new').addEventListener('click', () => {
+  const f = $('#sk-form');
+  f.hidden = false;
+  $('#sk-name').value = '';
+  $('#sk-desc').value = '';
+  $('#sk-content').value = '';
+  $('#sk-result').textContent = '';
+  $('#sk-result').className = 'set-result';
+  $('#sk-name').focus();
+});
+$('#sk-cancel').addEventListener('click', () => { $('#sk-form').hidden = true; });
+
+$('#sk-save').addEventListener('click', async () => {
+  const res  = $('#sk-result');
+  const name = $('#sk-name').value.trim().toLowerCase().replace(/[^a-z0-9-]/g, '');
+  const desc = $('#sk-desc').value.trim().replace(/\s+/g, ' ');
+  const body = $('#sk-content').value.trim();
+  if (!name) { res.textContent = 'Укажите имя'; res.className = 'set-result set-result--err'; return; }
+  if (!desc) { res.textContent = 'Укажите описание'; res.className = 'set-result set-result--err'; return; }
+  if (!body) { res.textContent = 'Введите инструкцию'; res.className = 'set-result set-result--err'; return; }
+  const content = `---\nname: ${name}\ndescription: ${desc}\n---\n\n${body}\n`;
+  res.textContent = 'Сохраняю…';
+  res.className = 'set-result';
+  try {
+    const r = await fetch('/api/skill/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, content }),
+    });
+    if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || `HTTP ${r.status}`); }
+    res.textContent = '✓ Сохранено';
+    res.className = 'set-result set-result--ok';
+    $('#sk-form').hidden = true;
+    await loadSkills();
+  } catch (e) {
+    res.textContent = '✗ ' + e.message;
+    res.className = 'set-result set-result--err';
+  }
+});
+
 // ── Logs modal ────────────────────────────────────────────────────
 const logOut = $('#log-out');
 let logPollId = null;
@@ -492,5 +775,9 @@ new MutationObserver(() => {
 }).observe(logModal, { attributes: true, attributeFilter: ['hidden'] });
 
 // ── Init ───────────────────────────────────────────────────────────
+loadSessions();
+renderSession();
+renderHistoryList();
+setContext(currentSession()?.tokens || 0, 16384);
 checkEngine();
 setInterval(checkEngine, 15_000);

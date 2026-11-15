@@ -30,6 +30,7 @@
 }
 
 * { box-sizing: border-box; margin: 0; }
+[hidden] { display: none !important; }
 html { font: 14px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
 body { background: var(--bg); color: var(--text); height: 100vh; overflow: hidden; }
 button { cursor: pointer; font: inherit; }
@@ -57,10 +58,10 @@ code { background: var(--surface-2); padding: 1px 5px; border-radius: 3px; font-
 .hdr__brand { font-size: 17px; font-weight: 700; white-space: nowrap; }
 .hdr__brand b { color: var(--accent); }
 
-.hdr__icons {
+.hdr__left {
   display: flex;
-  gap: 6px;
-  margin: 0 auto;
+  align-items: center;
+  gap: 10px;
 }
 
 .hdr__right {
@@ -110,6 +111,40 @@ code { background: var(--surface-2); padding: 1px 5px; border-radius: 3px; font-
 .hdr__action:disabled { opacity: .3; cursor: default; }
 .hdr__action:hover:not(:disabled) { background: var(--border); }
 
+/* ── Dropdown menu ──────────────────────────── */
+.menu-wrap { position: relative; }
+.menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  min-width: 230px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 6px;
+  box-shadow: var(--shadow);
+  z-index: 300;
+  animation: fadeIn .12s ease;
+}
+.menu[hidden] { display: none; }
+.menu__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  text-align: left;
+  transition: background .12s;
+}
+.menu__item:hover:not(:disabled) { background: var(--surface-2); }
+.menu__item:disabled { opacity: .4; cursor: default; }
+.menu__sep { height: 1px; background: var(--border); margin: 6px 4px; }
+
 /* ── Chat area (main screen) ────────────────── */
 .chat-area {
   flex: 1;
@@ -137,6 +172,7 @@ code { background: var(--surface-2); padding: 1px 5px; border-radius: 3px; font-
   text-align: center;
   padding: 40px;
 }
+.msgs__welcome[hidden] { display: none; }
 .msgs__spark { font-size: 48px; color: var(--accent); }
 .msgs__welcome h2 { font-size: 22px; color: var(--text); }
 .msgs__welcome p  { font-size: 13px; max-width: 420px; }
@@ -179,6 +215,8 @@ code { background: var(--surface-2); padding: 1px 5px; border-radius: 3px; font-
   font-size: 12px;
   color: var(--muted);
   max-width: 90%;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 /* ── Tool-call events ─────────────────────── */
@@ -583,6 +621,83 @@ code { background: var(--surface-2); padding: 1px 5px; border-radius: 3px; font-
   margin-bottom: 8px;
 }
 
+/* ── Skills: hint + create form ─────────────── */
+.skills-hint {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.55;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+}
+.sk-form {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+.sk-form[hidden] { display: none; }
+.sk-form textarea {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 8px 12px;
+  color: var(--text);
+  font-size: 13px;
+  resize: vertical;
+  line-height: 1.5;
+}
+.sk-form textarea:focus { outline: none; border-color: var(--accent); }
+
+/* ── History modal ──────────────────────────── */
+.hist-new {
+  width: 100%;
+  justify-content: center;
+  margin-bottom: 10px;
+}
+.hist-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  max-height: 380px;
+  overflow-y: auto;
+}
+.hist-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  margin-bottom: 6px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color .12s, background .12s;
+}
+.hist-item:hover { background: var(--surface-2); }
+.hist-item.sel { border-color: var(--accent); }
+.hist-info { flex: 1; min-width: 0; }
+.hist-title {
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hist-meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.hist-del {
+  width: 26px; height: 26px;
+  border: 0; border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.hist-del:hover { background: var(--border); color: var(--error); }
+.hist-empty { font-size: 13px; color: var(--muted); padding: 10px 2px; }
+
 /* ── Logs modal ─────────────────────────────── */
 .engine-panel {
   display: flex;
@@ -611,8 +726,9 @@ code { background: var(--surface-2); padding: 1px 5px; border-radius: 3px; font-
 /* ── Responsive ─────────────────────────────── */
 @media (max-width: 700px) {
   .hdr__brand { font-size: 14px; }
-  .hdr__icons { gap: 4px; }
+  .hdr__status #engine-label { display: none; }
   .hdr__icon  { width: 30px; height: 30px; font-size: 14px; }
+  .ctx { width: 36px; height: 36px; }
   .modal--wide { width: 100%; max-height: 92vh; }
   .files-grid, .sk-grid { grid-template-columns: 1fr; }
   .files-list, .sk-list { max-height: 140px; }

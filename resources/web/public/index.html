@@ -13,32 +13,40 @@
 
   <!-- ─── HEADER ─────────────────────────────────────────────── -->
   <header class="hdr">
-    <span class="hdr__brand">Agent <b>Lite</b></span>
-
-    <div class="hdr__icons">
-      <button class="hdr__icon" id="btn-settings" title="Настройки">⚙️</button>
-      <button class="hdr__icon" id="btn-files"    title="Файлы">📁</button>
-      <button class="hdr__icon" id="btn-skills"    title="Навыки">🧩</button>
-      <button class="hdr__icon" id="btn-logs"      title="Логи">📜</button>
-    </div>
-
-    <div class="hdr__right">
-      <!-- Context ring -->
+    <div class="hdr__left">
       <button id="ctx-btn" class="ctx" title="Контекст: нажмите для сжатия">
         <svg class="ctx__ring" viewBox="0 0 36 36">
-          <path class="ctx__ring-bg"  d="M18 2.0845a 15.9155 15.9155 0 0 1 0 31.831 15.9155 15.9155 0 0 1 0-31.831" fill="none" stroke="currentColor" stroke-width="3" opacity=".25"/>
-          <path class="ctx__ring-fg"  d="M18 2.0845a 15.9155 15.9155 0 0 1 0 31.831 15.9155 15.9155 0 0 1 0-31.831" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="0, 100" stroke-linecap="round" transform="rotate(-90 18 18)"/>
+          <path class="ctx__ring-bg" d="M18 2.0845a 15.9155 15.9155 0 0 1 0 31.831 15.9155 15.9155 0 0 1 0-31.831" fill="none" stroke="currentColor" stroke-width="3" opacity=".25"/>
+          <path class="ctx__ring-fg" d="M18 2.0845a 15.9155 15.9155 0 0 1 0 31.831 15.9155 15.9155 0 0 1 0-31.831" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="0, 100" stroke-linecap="round" transform="rotate(-90 18 18)"/>
         </svg>
         <span class="ctx__label" id="ctx-label">0%</span>
       </button>
+      <span class="hdr__brand">Agent <b>Lite</b></span>
+    </div>
 
-      <div class="hdr__status">
+    <div class="hdr__right">
+      <div class="hdr__status" title="Статус Colibri">
         <span class="dot" id="engine-dot"></span>
         <span id="engine-label">Не запущен</span>
       </div>
-      <button id="btn-start" class="hdr__action" title="Запустить Qwen">▶</button>
-      <button id="btn-stop"  class="hdr__action" disabled title="Остановить">⏹</button>
-      <button class="hdr__icon" id="theme-btn" title="Сменить тему">◐</button>
+
+      <button class="hdr__icon" id="btn-history" title="История чатов">🕘</button>
+      <button class="hdr__icon" id="btn-newchat" title="Новый чат">＋</button>
+
+      <div class="menu-wrap">
+        <button class="hdr__icon" id="btn-menu" title="Меню">☰</button>
+        <div class="menu" id="menu" hidden>
+          <button class="menu__item" data-open="settings">⚙️ Настройки</button>
+          <button class="menu__item" data-open="files">📁 Файлы</button>
+          <button class="menu__item" data-open="skills">🧩 Навыки</button>
+          <button class="menu__item" data-open="logs">📜 Логи</button>
+          <div class="menu__sep"></div>
+          <button class="menu__item" id="btn-start">▶ Запустить Colibri</button>
+          <button class="menu__item" id="btn-stop" disabled>⏹ Остановить Colibri</button>
+          <div class="menu__sep"></div>
+          <button class="menu__item" id="theme-btn">◐ Сменить тему</button>
+        </div>
+      </div>
     </div>
   </header>
 
@@ -59,7 +67,7 @@
     </div>
 
     <form id="chat-form" class="composer">
-      <textarea id="prompt" rows="3" placeholder="Опишите задачу…" aria-label="Сообщение"></textarea>
+      <textarea id="prompt" rows="3" placeholder="Опишите задачу… (↑/↓ — история ввода)" aria-label="Сообщение"></textarea>
       <div class="composer__bar">
         <button type="button" id="attach-btn" title="Прикрепить файл">📎</button>
         <input id="attach-input" type="file" multiple hidden
@@ -138,12 +146,34 @@
 
   <!-- ─── MODAL: SKILLS ──────────────────────────────────────── -->
   <div class="modal-overlay" id="modal-skills" hidden>
-    <div class="modal">
+    <div class="modal modal--wide">
       <div class="modal__hdr">
         <h3>🧩 Навыки</h3>
-        <button class="modal__close" data-close="skills">✕</button>
+        <div class="modal__hdr-right">
+          <button id="sk-new" class="btn btn--primary">＋ Новый навык</button>
+          <button class="modal__close" data-close="skills">✕</button>
+        </div>
       </div>
       <div class="modal__body">
+        <p class="skills-hint">Навыки (Skills) — это макросы и инструкции, которые агент подгружает по мере необходимости. Они помогают модели экономить контекст и действовать по чёткому алгоритму (например, правка файла по якорю или коммит в Git).</p>
+
+        <div id="sk-form" class="sk-form" hidden>
+          <label class="fld">Имя (латиница, дефисы)
+            <input id="sk-name" type="text" placeholder="my-skill">
+          </label>
+          <label class="fld">Описание (одна строка)
+            <input id="sk-desc" type="text" placeholder="Что делает навык">
+          </label>
+          <label class="fld">Инструкция
+            <textarea id="sk-content" rows="9" placeholder="1. Вызови grep…"></textarea>
+          </label>
+          <div class="modal__actions">
+            <button id="sk-save" class="btn btn--primary">Сохранить</button>
+            <button id="sk-cancel" class="btn btn--ghost">Отмена</button>
+            <span id="sk-result" class="set-result"></span>
+          </div>
+        </div>
+
         <div class="sk-grid">
           <ul id="sk-list" class="sk-list"></ul>
           <div class="sk-view">
@@ -151,6 +181,20 @@
             <pre id="sk-body" class="code-block">Кликните на навык слева.</pre>
           </div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── MODAL: HISTORY ─────────────────────────────────────── -->
+  <div class="modal-overlay" id="modal-history" hidden>
+    <div class="modal">
+      <div class="modal__hdr">
+        <h3>🕘 История чатов</h3>
+        <button class="modal__close" data-close="history">✕</button>
+      </div>
+      <div class="modal__body">
+        <button id="hist-new" class="btn btn--primary hist-new">＋ Новый чат</button>
+        <ul id="hist-list" class="hist-list"></ul>
       </div>
     </div>
   </div>

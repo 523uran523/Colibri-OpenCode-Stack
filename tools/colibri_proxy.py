@@ -37,7 +37,7 @@ TOOLLESS_MODELS = {"parable-qwen3-4b"}
 # "tools" config map, so filtering happens here instead.
 # "write,read,list" = speed benchmark only; 6 tools = real work.
 KEEP_TOOLS = {
-    "qwen3-coder-30b-a3b-colibri": {"write", "read", "list", "edit", "bash", "grep"},
+    "qwen3-coder-30b-a3b-colibri": {"write", "read", "list", "edit", "bash", "grep", "read_skill"},
 }
 
 _lock = threading.Lock()

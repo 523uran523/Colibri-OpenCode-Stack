@@ -176,8 +176,10 @@ async function saveConfig(input, {openRouterKey,dryRun=false,baseline=config}={}
     if(dir===path.parse(dir).root)throw fail('Выберите отдельную папку, а не весь диск.');
     if(key==='workspace' && inside(DATA,dir))throw fail('Личные настройки нельзя выбирать рабочей папкой.');
     if(existsSync(dir) && (!lstatSync(dir).isDirectory() || lstatSync(dir).isSymbolicLink())) throw fail('Укажите обычную папку.');
+    // A project root must already exist — don't silently create a typo'd path.
+    if(key==='workspace' && input.workspace!==undefined && !existsSync(dir)) throw fail('Папка не найдена: '+dir);
     noLinks(path.parse(dir).root,dir);
-    if(!dryRun)await fs.mkdir(dir,{recursive:true});
+    if(!dryRun && key!=='workspace')await fs.mkdir(dir,{recursive:true});
     // Store paths inside the archive relative to its root, preserving portability.
     next[key]=inside(ROOT,dir) ? path.relative(ROOT,dir) : dir;
   }
@@ -729,7 +731,7 @@ const server=http.createServer(async(req,res)=>{
       // Build the agent system prompt
       const wsPath = absolute(config.workspace);
       const skills = await skillList();
-      const agentSystem = [
+      let agentSystem = [
         'Ты — Agent Lite, локальный агент-программист. Ты работаешь прямо в рабочей папке пользователя.',
         '',
         `Твоя рабочая папка: ${wsPath}`,
@@ -741,11 +743,18 @@ const server=http.createServer(async(req,res)=>{
         '- Если нужно исправить код — используй edit (точечная замена) или write (новый файл).',
         '- Если нужно выполнить команду (node --check, git status) — используй bash.',
         '- Если файл длинный — читай его кусками через read с offset/limit.',
+        '- Если задача упоминает навык или просит «использовать навык» — сначала вызови read_skill с его именем и следуй инструкции.',
         '- Всегда подтверждай результат: что ты изменил и где.',
         '',
         'Доступные навыки:',
         ...skills.map(s => `  ${s.name} — ${s.description}`),
       ].join('\n');
+
+      // Merge client-side system messages (e.g. compacted summary) into the
+      // agent system prompt — Qwen templates expect a single leading system message.
+      const clientSystem = messages.filter(m => m.role === 'system').map(m => String(m.content)).join('\n\n');
+      if (clientSystem) agentSystem += '\n\nКонтекст предыдущей сессии:\n' + clientSystem;
+      messages = messages.filter(m => m.role !== 'system');
 
       const base = (config.baseUrl || 'http://127.0.0.1:8001/v1').replace(/\/v1$/,'');
       const model  = body.model || config.model || 'qwen3-coder-30b-a3b-colibri';
@@ -758,6 +767,7 @@ const server=http.createServer(async(req,res)=>{
         tool('edit','Точечная замена в файле.',{path:str('Путь к файлу.'),old_string:str('Точный текст для поиска.'),new_string:str('Замена.')},['path','old_string','new_string']),
         tool('list','Список файлов в папке.',{path:str('Папка, пусто для корня.')}),
         tool('grep','Поиск по файлам.',{pattern:str('Регулярное выражение или текст.'),path:str('Файл или папка.'),include:str('Фильтр файлов (например *.js).')},['pattern']),
+        tool('read_skill','Прочитать инструкцию навыка из папки skills.',{name:str('Имя навыка, например edit-by-anchor.')},['name']),
         tool('bash','Выполнить команду.',{command:str('Команда в терминале.'),workdir:str('Рабочая папка, по умолчанию workspace.')},['command']),
       ];
 
@@ -778,7 +788,7 @@ const server=http.createServer(async(req,res)=>{
               tools: agentTools,
               tool_choice: 'auto',
             }),
-            signal: AbortSignal.timeout(180_000),
+            signal: AbortSignal.timeout(300_000),
           });
           if (!resp.ok) {
             const errText = await resp.text().catch(() => '');
@@ -870,6 +880,17 @@ const server=http.createServer(async(req,res)=>{
                     }
                     break;
                   }
+                  case 'read_skill': {
+                    const name = String(args.name || '').trim().toLowerCase().replace(/[^a-z0-9-]/g, '');
+                    if (!name) { toolResult = 'Ошибка: не указано имя навыка.'; break; }
+                    try {
+                      const text = await fs.readFile(path.join(SKILLS, name, 'SKILL.md'), 'utf8');
+                      toolResult = text.slice(0, 8000);
+                    } catch {
+                      toolResult = `Навык «${name}» не найден. Доступные: ${(await skillList()).map(s => s.name).join(', ')}`;
+                    }
+                    break;
+                  }
                   case 'bash': {
                     const cmd = String(args.command || '');
                     const cwd = args.workdir ? workspacePath(String(args.workdir)) : absolute(config.workspace);
@@ -894,11 +915,11 @@ const server=http.createServer(async(req,res)=>{
 
           // Final answer
           const reply = choice.message?.content ?? JSON.stringify(data);
-          // Track token usage
+          // Track current context fill = tokens of the latest request
           const usage = data.usage;
-          if (usage) ctxTokens += (usage.prompt_tokens || 0) + (usage.completion_tokens || 0);
-          // Store the full conversation (user messages + final reply)
-          chatHistory.push(...messages, { role: 'assistant', content: reply });
+          if (usage) ctxTokens = (usage.prompt_tokens || 0) + (usage.completion_tokens || 0);
+          // Client sends the whole history each turn — mirror it, don't append
+          chatHistory = [...messages, { role: 'assistant', content: reply }];
           return send(res, 200, {
             choices: [{ message: { role: 'assistant', content: reply } }],
             tool_events: toolEvents,
@@ -917,14 +938,22 @@ const server=http.createServer(async(req,res)=>{
     }
     // POST /api/context/compact — summarize old messages, keep last N
     if(req.method==='POST' && route==='/api/context/compact'){
-      if (chatHistory.length < 4) return send(res, 200, { compacted: false, message: 'История слишком короткая для сжатия' });
+      let cbody = {};
+      try { cbody = await readBody(req); } catch {}
+      const src = Array.isArray(cbody.messages) && cbody.messages.length
+        ? cbody.messages.filter(m => m && typeof m.content === 'string' && m.content.trim())
+        : chatHistory;
+      if (src.length < 4) return send(res, 200, { compacted: false, message: 'История слишком короткая для сжатия' });
       // Keep last 3 messages
-      const keep = chatHistory.slice(-3);
-      const toSummarize = chatHistory.slice(0, -3);
+      const keep = src.slice(-3);
+      const toSummarize = src.slice(0, -3);
+      const prevSummary = toSummarize.filter(m => m.role === 'system').map(m => String(m.content)).join('\n');
+      const dialog = toSummarize.filter(m => m.role !== 'system');
       try {
         const base = (config.baseUrl || 'http://127.0.0.1:8001/v1').replace(/\/v1$/,'');
         const model = config.model || 'qwen3-coder-30b-a3b-colibri';
-        const summaryPrompt = 'Кратко суммаризируй этот диалог. Сохрани все важные технические решения, имена файлов и изменения в коде. Формат: нумерованный список ключевых фактов.';
+        const summaryPrompt = 'Кратко суммаризируй этот диалог. Сохрани все важные технические решения, имена файлов и изменения в коде. Формат: нумерованный список ключевых фактов.'
+          + (prevSummary ? '\n\nРанее уже было сжато:\n' + prevSummary : '');
         const sumResp = await fetch(base + '/v1/chat/completions', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -932,13 +961,13 @@ const server=http.createServer(async(req,res)=>{
             model,
             messages: [
               { role: 'system', content: summaryPrompt },
-              ...toSummarize,
+              ...dialog,
             ],
             max_tokens: 512,
             stream: false,
             enable_thinking: false,
           }),
-          signal: AbortSignal.timeout(60_000),
+          signal: AbortSignal.timeout(300_000),
         });
         if (!sumResp.ok) throw new Error(`Summarize failed: HTTP ${sumResp.status}`);
         const sumData = await sumResp.json();
@@ -948,7 +977,9 @@ const server=http.createServer(async(req,res)=>{
           { role: 'system', content: `Краткое содержание предыдущего диалога:\n${summary}` },
           ...keep,
         ];
-        ctxTokens = 0; // reset counter
+        // Rough token estimate of the compacted history (~4 chars per token)
+        // + fixed overhead of the agent system prompt and tool catalog.
+        ctxTokens = 1400 + Math.max(1, Math.round(chatHistory.reduce((n, m) => n + String(m.content || '').length, 0) / 4));
         return send(res, 200, {
           compacted: true,
           summary: summary.slice(0, 500),
@@ -956,7 +987,7 @@ const server=http.createServer(async(req,res)=>{
           usage: {
             current_tokens: ctxTokens,
             max_tokens: 16384,
-            pct: 0,
+            pct: Math.min(100, Math.round(ctxTokens / 16384 * 100)),
           },
           new_history: chatHistory,
         });

@@ -1,24 +1,14 @@
 ---
 name: git-commit
-description: Сохранять изменения через git add + git commit. Сначала проверить git status.
-tags: [git, versioning, workflow]
+description: Коммит: git status → add → diff --cached → commit.
 ---
 
-# Навык: git commit
+# Git commit
 
-## Когда использовать
-Когда нужно сохранить изменения в контроле версий.
+1. `bash` git status — проверь изменения.
+2. `bash` git add <нужные файлы>.
+3. `bash` git diff --cached.
+4. `bash` git commit -m "что сделано".
+5. Ответ: хеш, файлы, +/−.
 
-## Алгоритм
-1. `git status` — посмотри, какие файлы изменены. Убедись, что нет лишних файлов (temp, .log, .bak, node_modules).
-2. `git add <файлы>` — добавь только нужные файлы в индекс. Или `git add .` если все изменения твои.
-3. `git diff --cached` — посмотри, что именно будет закоммичено.
-4. `git commit -m "краткое описание изменений"` — сделай коммит.
-5. Подтверди: «Коммит NNNN: описание. Файлов: X, добавлено: +Y, удалено: -Z».
-
-## Правила
-- **Всегда** `git status` **до** `git add`.
-- Не коммить секреты: `.env`, `settings.json` с токенами, `*.key`.
-- Не коммить артефакты: `node_modules/`, `*.log`, `*.tmp`, `dist/`, `build/`.
-- Сообщение коммита — короткое, на английском или русском, в виде imperative mood: "Add review section to index.html".
-- Если `git status` показывает чужие изменения (не твои) — НЕ коммить их, сообщи пользователю.
+Не коммить секреты (.env, ключи) и артефакты (node_modules, *.log, dist). Чужие изменения не трогай.
