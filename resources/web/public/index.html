@@ -69,8 +69,9 @@
     <section id="view-files" class="view" hidden>
       <div class="sec-hdr">
         <h2>Файлы проекта</h2>
+        <span id="fs-ws-label" class="fs-ws-label"></span>
         <label class="lbl">
-          Путь <input id="fs-path" type="text" placeholder="workspace" required>
+          Путь <input id="fs-path" type="text" placeholder="папка внутри проекта" required>
           <button id="fs-go" class="btn btn--primary">Открыть</button>
         </label>
       </div>
@@ -116,8 +117,12 @@
         <label>Макс. токены
           <input id="cfg-tokens" type="number" value="4096" min="128" max="16384" step="128">
         </label>
+        <label>Рабочая папка
+          <input id="cfg-workspace" type="text" value="C:\Users\523ur\OneDrive\Документы\MeWeb">
+        </label>
         <div class="set-actions">
           <button id="cfg-probe" class="btn btn--ghost">Проверить</button>
+          <button id="cfg-save" class="btn btn--primary">Сохранить</button>
           <span id="cfg-result" class="set-result"></span>
         </div>
       </div>

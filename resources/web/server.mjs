@@ -679,7 +679,7 @@ const server=http.createServer(async(req,res)=>{
     }
     // GET /api/config — current config (public fields only)
     if(req.method==='GET' && route==='/api/config')
-      return send(res, 200, { baseUrl: config.baseUrl, model: config.model, maxTokens: config.maxTokens || 4096, provider: config.provider });
+      return send(res, 200, { baseUrl: config.baseUrl, model: config.model, maxTokens: config.maxTokens || 4096, provider: config.provider, workspace: config.workspace });
     // GET /api/skills — list skill names
     if(req.method==='GET' && route==='/api/skills'){
       const list = await skillList();
