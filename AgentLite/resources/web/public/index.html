@@ -1,0 +1,243 @@
+﻿<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>Agent Lite</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+<div class="app">
+
+  <!-- ─── HEADER ─────────────────────────────────────────────── -->
+  <header class="hdr">
+    <div class="hdr__left">
+      <button id="ctx-btn" class="ctx" title="Контекст: нажмите для сжатия">
+        <svg class="ctx__ring" viewBox="0 0 36 36">
+          <path class="ctx__ring-bg" d="M18 2.0845a 15.9155 15.9155 0 0 1 0 31.831 15.9155 15.9155 0 0 1 0-31.831" fill="none" stroke="currentColor" stroke-width="3" opacity=".25"/>
+          <path class="ctx__ring-fg" d="M18 2.0845a 15.9155 15.9155 0 0 1 0 31.831 15.9155 15.9155 0 0 1 0-31.831" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="0, 100" stroke-linecap="round" transform="rotate(-90 18 18)"/>
+        </svg>
+        <span class="ctx__label" id="ctx-label">0%</span>
+      </button>
+      <span class="hdr__brand">Agent <b>Lite</b></span>
+    </div>
+
+    <div class="hdr__right">
+      <div class="hdr__status" title="Статус Colibri">
+        <span class="dot" id="engine-dot"></span>
+        <span id="engine-label">Не запущен</span>
+      </div>
+
+      <div class="mode-toggle" id="mode-toggle" role="group" aria-label="Режим работы">
+        <button class="mode-pill mode-pill--chat" id="mode-chat" title="Чат — ответы без инструментов и файлов">💬 Чат</button>
+        <button class="mode-pill mode-pill--agent active" id="mode-agent" title="Агент — инструменты, файлы, навык edit-by-anchor">🛠 Агент</button>
+      </div>
+
+      <button class="hdr__icon" id="btn-history" title="История чатов">🕘</button>
+      <button class="hdr__icon" id="btn-clear-history" title="Очистить историю — сбросить неудачный контекст">🗑</button>
+      <button class="hdr__icon" id="btn-newchat" title="Новый чат">＋</button>
+
+      <div class="menu-wrap">
+        <button class="hdr__icon" id="btn-menu" title="Меню">☰</button>
+        <div class="menu" id="menu" hidden>
+          <button class="menu__item" data-open="settings">⚙️ Настройки</button>
+          <button class="menu__item" data-open="files">📁 Файлы</button>
+          <button class="menu__item" data-open="skills">🧩 Навыки</button>
+          <button class="menu__item" data-open="logs">📜 Логи</button>
+          <div class="menu__sep"></div>
+          <button class="menu__item" id="btn-start">▶ Запустить Colibri</button>
+          <button class="menu__item" id="btn-stop" disabled>⏹ Остановить Colibri</button>
+          <div class="menu__sep"></div>
+          <button class="menu__item" id="theme-btn">◐ Сменить тему</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ─── MAIN CHAT ──────────────────────────────────────────── -->
+  <main class="chat-area">
+    <div id="msgs" class="msgs">
+      <div class="msgs__welcome">
+        <div class="msgs__spark">✦</div>
+        <h2>Спросите что-нибудь</h2>
+        <p>Модель Qwen3-Coder отвечает локально через Colibri-прокси.<br>
+           Используйте навык <code>edit-by-anchor</code> для правок файлов.</p>
+      </div>
+    </div>
+
+    <form id="chat-form" class="composer">
+      <textarea id="prompt" rows="3" placeholder="Опишите задачу… (↑/↓ — история ввода)" aria-label="Сообщение"></textarea>
+      <div class="composer__bar">
+        <button type="button" id="attach-btn" title="Прикрепить файл">📎</button>
+        <input id="attach-input" type="file" multiple hidden
+               accept=".txt,.md,.json,.csv,.yaml,.yml,.py,.js,.html,.css,.log,.png,.jpg,.jpeg,.webp">
+        <span class="composer__spacer"></span>
+        <button type="button" id="stop-btn" class="btn btn--ghost" hidden>Остановить</button>
+        <button type="submit" id="send-btn" class="btn btn--primary">Отправить</button>
+      </div>
+    </form>
+  </main>
+
+  <!-- ─── MODAL: SETTINGS ─────────────────────────────────────── -->
+  <div class="modal-overlay" id="modal-settings" hidden>
+    <div class="modal">
+      <div class="modal__hdr">
+        <h3>⚙️ Настройки</h3>
+        <button class="modal__close" data-close="settings">✕</button>
+      </div>
+      <div class="modal__body">
+        <label class="fld">Адрес прокси
+          <input id="cfg-base" type="text" value="http://127.0.0.1:8001/v1">
+        </label>
+        <label class="fld">Модель
+          <input id="cfg-model" type="text" value="qwen3-coder-30b-a3b-colibri">
+        </label>
+        <label class="fld">Макс. токены
+          <input id="cfg-tokens" type="number" value="4096" min="128" max="16384" step="128">
+        </label>
+        <label class="fld">Рабочая папка
+          <input id="cfg-workspace" type="text" value="">
+        </label>
+        <div class="modal__actions">
+          <button id="cfg-probe" class="btn btn--ghost">Проверить</button>
+          <button id="cfg-save"  class="btn btn--primary">Сохранить</button>
+          <span id="cfg-result" class="set-result"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── MODAL: FILES ────────────────────────────────────────── -->
+  <div class="modal-overlay" id="modal-files" hidden>
+    <div class="modal modal--wide">
+      <div class="modal__hdr">
+        <h3>📁 Файлы проекта</h3>
+        <button class="modal__close" data-close="files">✕</button>
+      </div>
+      <div class="modal__body">
+        <div class="files-bar">
+          <div class="files-bar__row">
+            <label class="files-label">Проект</label>
+            <input id="fs-root" type="text" placeholder="C:\Users\...\Project" title="Корневая папка проекта">
+            <button id="fs-root-go" class="btn btn--primary" title="Сменить проект">Сменить проект</button>
+          </div>
+          <div class="files-bar__row">
+            <label class="files-label">Внутри</label>
+            <input id="fs-path" type="text" placeholder="папка внутри проекта">
+            <button id="fs-go" class="btn btn--primary">Открыть</button>
+          </div>
+          <span id="fs-result" class="fs-result"></span>
+        </div>
+        <div class="files-grid">
+          <div id="fs-list" class="files-list"></div>
+          <div class="files-preview">
+            <h3 id="fs-name">Выберите файл</h3>
+            <div class="files-actions">
+              <button id="fs-save"  class="btn btn--primary" hidden>Сохранить</button>
+              <button id="fs-close" class="btn btn--ghost">Закрыть</button>
+            </div>
+            <pre id="fs-content" class="code-block" contenteditable="false"></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── MODAL: SKILLS ──────────────────────────────────────── -->
+  <div class="modal-overlay" id="modal-skills" hidden>
+    <div class="modal modal--wide">
+      <div class="modal__hdr">
+        <h3>🧩 Навыки</h3>
+        <div class="modal__hdr-right">
+          <button id="sk-new" class="btn btn--primary">＋ Новый навык</button>
+          <button class="modal__close" data-close="skills">✕</button>
+        </div>
+      </div>
+      <div class="modal__body">
+        <p class="skills-hint">Навыки (Skills) — это макросы и инструкции, которые агент подгружает по мере необходимости. Они помогают модели экономить контекст и действовать по чёткому алгоритму (например, правка файла по якорю или коммит в Git).</p>
+
+        <div id="sk-form" class="sk-form" hidden>
+          <label class="fld">Имя (латиница, дефисы)
+            <input id="sk-name" type="text" placeholder="my-skill">
+          </label>
+          <label class="fld">Описание (одна строка)
+            <input id="sk-desc" type="text" placeholder="Что делает навык">
+          </label>
+          <label class="fld">Инструкция
+            <textarea id="sk-content" rows="9" placeholder="1. Вызови grep…"></textarea>
+          </label>
+          <div class="modal__actions">
+            <button id="sk-save" class="btn btn--primary">Сохранить</button>
+            <button id="sk-cancel" class="btn btn--ghost">Отмена</button>
+            <span id="sk-result" class="set-result"></span>
+          </div>
+        </div>
+
+        <div class="sk-grid">
+          <ul id="sk-list" class="sk-list"></ul>
+          <div class="sk-view">
+            <h3 id="sk-title">Выберите навык</h3>
+            <pre id="sk-body" class="code-block">Кликните на навык слева.</pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── MODAL: HISTORY ─────────────────────────────────────── -->
+  <div class="modal-overlay" id="modal-history" hidden>
+    <div class="modal">
+      <div class="modal__hdr">
+        <h3>🕘 История чатов</h3>
+        <button class="modal__close" data-close="history">✕</button>
+      </div>
+      <div class="modal__body">
+        <button id="hist-new" class="btn btn--primary hist-new">＋ Новый чат</button>
+        <ul id="hist-list" class="hist-list"></ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── MODAL: DIFF ─────────────────────────────────────────── -->
+  <div class="modal-overlay" id="modal-diff" hidden>
+    <div class="modal modal--wide">
+      <div class="modal__hdr">
+        <h3 id="diff-title">Diff: файл</h3>
+        <button class="modal__close" data-close="diff">✕</button>
+      </div>
+      <div class="modal__body">
+        <div class="diff-label diff-label--old">Было</div>
+        <pre id="diff-old" class="code-block diff-pre"></pre>
+        <div class="diff-label diff-label--new">Стало</div>
+        <pre id="diff-new" class="code-block diff-pre"></pre>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="modal-logs" hidden>
+    <div class="modal modal--wide">
+      <div class="modal__hdr">
+        <h3>📜 Логи</h3>
+        <div class="modal__hdr-right">
+          <button id="log-clear" class="btn btn--ghost">Очистить</button>
+          <button id="log-refresh" class="btn btn--ghost">Обновить</button>
+          <button class="modal__close" data-close="logs">✕</button>
+        </div>
+      </div>
+      <div class="modal__body">
+        <div class="engine-panel">
+          <div class="engine-panel__row">
+            <span class="dot" id="eng-panel-dot"></span>
+            <span id="eng-panel-label">Статус движка…</span>
+          </div>
+        </div>
+        <pre id="log-out" class="code-block log-block">Загрузка…</pre>
+      </div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
