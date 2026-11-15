@@ -161,7 +161,7 @@ form.addEventListener('submit', async e => {
     const resp = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages: [...history, { role: 'assistant', content: '' }] }),
+      body: JSON.stringify({ messages: history }),
     });
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({}));
@@ -177,9 +177,11 @@ form.addEventListener('submit', async e => {
     } else {
       bubble.textContent = `Ошибка: ${err.message}`;
       bubble.style.color = 'var(--error)';
+      // Don't push a broken assistant message into history on error
     }
   } finally {
     thinking.hidden = true;
+    thinkingTx.textContent = 'Модель думает…';
     sendBtn.disabled = false;
     stopBtn.hidden = true;
     stopBtn.onclick = null;

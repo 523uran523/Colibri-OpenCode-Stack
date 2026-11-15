@@ -707,7 +707,13 @@ const server=http.createServer(async(req,res)=>{
     if(req.method==='POST' && route==='/api/chat'){
       let body;
       try { body = await readBody(req); } catch { body = {}; }
-      const messages = Array.isArray(body.messages) ? body.messages : [];
+      // Sanitize: remove empty messages, strip thinking tags
+      let messages = Array.isArray(body.messages) ? body.messages : [];
+      messages = messages
+        .filter(m => m.content !== undefined && String(m.content).trim() !== '')
+        .map(m => ({ ...m, content: String(m.content).replace(/<think[^>]*>[\s\S]*?<\/think>/gi, '').trim() }))
+        .filter(m => String(m.content).trim() !== '');
+      if (messages.length === 0) return send(res, 400, { error: 'Нет сообщений для отправки' });
       try {
         const base = (config.baseUrl || 'http://127.0.0.1:8001/v1').replace(/\/v1$/,'');
         const model  = body.model || config.model || 'qwen3-coder-30b-a3b-colibri';
@@ -715,12 +721,12 @@ const server=http.createServer(async(req,res)=>{
         const resp = await fetch(base + '/v1/chat/completions', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model, messages, max_tokens: maxTok, stream: false }),
+          body: JSON.stringify({ model, messages, max_tokens: maxTok, stream: false, enable_thinking: false }),
           signal: AbortSignal.timeout(120_000),
         });
         if (!resp.ok) {
           const errText = await resp.text().catch(()=> '');
-          return send(res, 502, { error: `Upstream ${resp.status}: ${errText.slice(0,200)}` });
+          return send(res, 502, { error: `Upstream ${resp.status}: ${errText.slice(0,300)}` });
         }
         const data = await resp.json();
         return send(res, 200, data);
