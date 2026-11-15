@@ -255,6 +255,34 @@ code { background: var(--surface-2); padding: 1px 5px; border-radius: 3px; font-
   white-space: pre-wrap;
   opacity: .9;
 }
+/* ── Per-message work line + elapsed time ───── */
+.work-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-style: italic;
+  font-size: 13px;
+}
+.work-line__label { opacity: .9; }
+.msg__timer {
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  padding: 1px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  opacity: .95;
+}
+.msg__time {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--muted);
+  opacity: .85;
+  font-variant-numeric: tabular-nums;
+}
+.msg__text { white-space: pre-wrap; }
 .tool-event {
   background: var(--surface-2);
   border: 1px solid var(--border);

@@ -377,15 +377,11 @@ btnStop.addEventListener('click', async () => {
 // ── Chat ──────────────────────────────────────────────────────────
 const form       = $('#chat-form');
 const promptEl   = $('#prompt');
-const thinking   = $('#thinking');
-const thinkingTx = $('#thinking-text');
-const thinkingTimer = $('#thinking-timer');
 const sendBtn    = $('#send-btn');
 const stopBtn    = $('#stop-btn');
 
 let chatAbort = null;
 let lastDiff = null;
-let timerInterval = null;
 
 // ── Chat/Agent mode toggle ────────────────────────────────────────
 const modeChat  = $('#mode-chat');
@@ -412,24 +408,28 @@ form.addEventListener('submit', async e => {
   history.push({ role: 'user', content: text });
   persistCurrent();
 
-  thinking.hidden = false;
-  thinkingTx.textContent = 'Модель думает…';
-  thinkingTimer.textContent = '00:00';
   sendBtn.disabled = true;
   stopBtn.hidden = false;
 
-  let timerSeconds = 0;
-  clearInterval(timerInterval);
-  timerInterval = setInterval(() => {
-    timerSeconds++;
-    const m = Math.floor(timerSeconds / 60).toString().padStart(2, '0');
-    const s = (timerSeconds % 60).toString().padStart(2, '0');
-    thinkingTimer.textContent = `${m}:${s}`;
-  }, 1000);
-
-  const bubble = addMsg('assistant', '…');
+  // Per-message work state: spinner + ticking timer inside the agent bubble
+  const t0 = Date.now();
+  const fmtElapsed = () => {
+    const sec = Math.floor((Date.now() - t0) / 1000);
+    return `${String(Math.floor(sec / 60)).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`;
+  };
+  const bubble = addMsg('assistant', '');
+  bubble.innerHTML = '<div class="work-line"><span class="spinner"></span><span class="work-line__label">Работает…</span><span class="msg__timer">00:00</span></div>';
+  const timerEl = bubble.querySelector('.msg__timer');
+  const msgTimer = setInterval(() => { timerEl.textContent = fmtElapsed(); }, 1000);
+  let finished = false;
+  const finishMsg = () => {
+    if (finished) return;
+    finished = true;
+    clearInterval(msgTimer);
+    timerEl.textContent = fmtElapsed();
+  };
   chatAbort = new AbortController();
-  stopBtn.onclick = () => { try { chatAbort.abort(); } catch {} clearInterval(timerInterval); };
+  stopBtn.onclick = () => { try { chatAbort.abort(); } catch {} finishMsg(); };
 
   try {
     const resp = await fetch('/api/chat', {
@@ -516,6 +516,16 @@ form.addEventListener('submit', async e => {
           toolLogDiv.remove();
           toolLogDiv = null;
         }
+        finishMsg();
+        const took = timerEl.textContent;
+        const textEl = document.createElement('div');
+        textEl.className = 'msg__text';
+        textEl.textContent = finalReply;
+        const meta = document.createElement('div');
+        meta.className = 'msg__time';
+        meta.textContent = `Заняло: ${took}`;
+        bubble.textContent = '';
+        bubble.append(textEl, meta);
       } else if (ev.type === 'error') {
         throw new Error(ev.message || 'Ошибка сервера');
       }
@@ -539,7 +549,6 @@ form.addEventListener('submit', async e => {
       }
     }
     if (finalReply == null) throw new Error('Пустой ответ от сервера');
-    bubble.textContent = finalReply;
     history.push({ role: 'assistant', content: finalReply });
 
     if (usage) {
@@ -549,6 +558,8 @@ form.addEventListener('submit', async e => {
     }
     persistCurrent();
   } catch (err) {
+    finishMsg();
+    const took = timerEl.textContent;
     if (err.name === 'AbortError') {
       bubble.textContent = '⏹ Остановлено';
       bubble.style.color = 'var(--muted)';
@@ -556,12 +567,13 @@ form.addEventListener('submit', async e => {
       bubble.textContent = `Ошибка: ${err.message}`;
       bubble.style.color = 'var(--error)';
     }
+    const meta = document.createElement('div');
+    meta.className = 'msg__time';
+    meta.textContent = `Заняло: ${took}`;
+    bubble.appendChild(meta);
   } finally {
     chatAbort = null;
-    clearInterval(timerInterval);
-    thinking.hidden = true;
-    thinkingTimer.textContent = '';
-    thinkingTx.textContent = 'Модель думает…';
+    if (msgTimer) clearInterval(msgTimer);
     sendBtn.disabled = false;
     stopBtn.hidden = true;
     stopBtn.onclick = null;

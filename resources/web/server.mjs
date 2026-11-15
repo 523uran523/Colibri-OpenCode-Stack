@@ -826,7 +826,7 @@ const server=http.createServer(async(req,res)=>{
       };
 
       try {
-        for (let round = 0; round < 8; round++) {
+        for (let round = 0; round < 15; round++) {
           const resp = await fetch(base + '/v1/chat/completions', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1030,7 +1030,7 @@ const server=http.createServer(async(req,res)=>{
           res.end();
           return;
         }
-        emit({ type: 'error', message: 'Слишком много раундов инструментов (макс. 8)' });
+        emit({ type: 'error', message: 'Слишком много раундов инструментов (макс. 15)' });
         res.end();
         return;
       } catch (e) {
