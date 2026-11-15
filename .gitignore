@@ -1,6 +1,9 @@
 # Secrets / local data (never commit)
-data/
+data/*
+!data/test_progress.md
 *.log
+__pycache__/
+*.orig
 !README.md
 
 # Bundled runtimes (large binaries, not under VCS)
