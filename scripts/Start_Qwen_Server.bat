@@ -46,6 +46,8 @@ set "CUDA_EXPERT_GB=3"
 set "HEAT_FILE=%COLI_MODEL_DRIVE%colibri_cache\qwen.heat"
 set "COLI_CACHE_DIR=%COLI_MODEL_DRIVE%colibri_cache"
 set "COLI_TOOL_FALLBACK=1"
+set "COLI_SPEC=1"
+set "PILOT=1"
 
 rem ---- ctx ladder ----------------------------------------------------------
 rem KV cache is fp16, 96 KiB/token (48 layers x 4 kv heads x 128 dim x 2 B):
@@ -73,7 +75,7 @@ echo Stopping any running colibri server on port 8000 ...
 
 echo Starting Qwen3-Coder-30B-A3B on http://127.0.0.1:8000/v1 (CUDA, cap 32, ctx %COLI_CTX%) ...
 echo Use this window for OpenCode; press Ctrl+C to stop.
-"%COLI_PY_EXE%" %COLI_PY_ARG% "%COLI_LAUNCHER%" serve --model "%COLI_MODEL_DRIVE%models\qwen3-coder-30b" --model-id qwen3-coder-30b-a3b-colibri --cap 32 --ctx %COLI_CTX% --host 127.0.0.1 --port 8000
+"%COLI_PY_EXE%" %COLI_PY_ARG% "%COLI_LAUNCHER%" serve --model "%COLI_MODEL_DRIVE%models\qwen3-coder-30b" --model-id qwen3-coder-30b-a3b-colibri --cap 32 --ctx %COLI_CTX% --host 127.0.0.1 --port 8000 --topp 0.7
 set "RC=%ERRORLEVEL%"
 echo.
 echo colibri server stopped (code %RC%).

@@ -41,3 +41,9 @@
 - [x] README.md: секция «Что нового в UI v9–v10», «до 8 раундов» → 15
 - [x] Финальный коммит в AgentLite (UI v10 + read-chunked п.6 + README)
 - [x] Синк tools/colibri_proxy.py → Colibri-OpenCode-Stack (коммит 541a808, push в origin/main: 4e7b4af..541a808)
+
+## Шаг 5 — Флаги движка + чистый рестарт + финальная перепроверка
+- [x] `resources/web/server.mjs` и `scripts/Start_Qwen_Server.bat` синхронизированы (обе копии: AgentLite и Colibri-OpenCode-Stack/AgentLite): движок стартует с `--topp 0.7`, env `COLI_SPEC=1`, `PILOT=1`; `node --check` ОК на обеих копиях server.mjs
+- [x] Чистый рестарт стека: убиты старые PID (3081/8000/8001), `Start-AgentLite.cmd`, engine state=running; в логе движка `pilot=1`, CUDA VRAM tier активен, `/health` 200
+- [x] `/api/chat` (mode=chat): HTTP 200, done-фрейм с ответом, `tool_events: []`, `total_rounds: 1`; SSE heartbeat `: ping`
+- [x] Замер: один раунд ≈ 275 с — стена ~300 с НЕ сняла (флаги качества/prefetch, а не дедлайн); честно фиксируем без заявлений о выигрыше
